@@ -107,12 +107,6 @@ const INITIAL_MATCHES = [
 function matchDateTime(m) {
   return new Date(`${m.date}T${m.time}:00Z`);
 }
-function matchLocalDisplay(m) {
-  const d = matchDateTime(m);
-  const date = d.toLocaleDateString("pt-BR");
-  const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return { date, time };
-}
 function minutesUntilMatch(m) {
   return (matchDateTime(m) - Date.now()) / 60000;
 }
@@ -289,7 +283,7 @@ export default function BolaoApp() {
         }
         if (m) setMatches(JSON.parse(m.value));
         if (p) setPredictions(JSON.parse(p.value));
-      } catch(e) {
+      } catch {
         // First run or storage empty — use defaults
       }
       setStorageReady(true);
@@ -539,7 +533,7 @@ function LoginScreen({ allUsers, setCurrentUser, setScreen }) {
 }
 
 // ─── REGISTER ─────────────────────────────────────────────────────────────────
-function RegisterScreen({ allUsers, users, setUsers, setCurrentUser, setScreen }) {
+function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen }) {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -621,7 +615,7 @@ function RegisterScreen({ allUsers, users, setUsers, setCurrentUser, setScreen }
 }
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
-function HomeScreen({ currentUser, ranking, setScreen, logout, matches, now, setActivePhase }) {
+function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActivePhase }) {
   const nextMatch = [...matches].filter(m => minutesUntilMatch(m) > 0).sort((a, b) => matchDateTime(a) - matchDateTime(b))[0];
   const myRank = ranking.findIndex(r => r.id === currentUser.id) + 1;
   const myData = ranking.find(r => r.id === currentUser.id);
@@ -750,7 +744,7 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
 }
 
 // ─── PREDICTIONS ──────────────────────────────────────────────────────────────
-function PredictionsScreen({ currentUser, users, matches, phases, activePhase, setActivePhase, tempPredictions, setTempPredictions, predictions, handleSavePredictions, savedAlert, setScreen, now }) {
+function PredictionsScreen({ currentUser, users, matches, phases, activePhase, setActivePhase, tempPredictions, setTempPredictions, predictions, handleSavePredictions, savedAlert, setScreen }) {
   const mult = PHASE_MULTIPLIERS[activePhase] || 1;
   const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
     const aLocked = isLocked(a);
