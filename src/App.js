@@ -203,17 +203,33 @@ const PT_NAMES = {
   "Russia": "Rússia", "China": "China", "India": "Índia", "Israel": "Israel",
 };
 
-// Normaliza um nome de time (remove bandeira/emoji, traduz EN→PT, tira acentos)
-// para comparar partidas vindas de fontes diferentes de forma confiável.
-function canonTeam(name) {
-  if (!name) return "";
-  let s = name
-    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, "")        // bandeiras (regional indicators)
-    .replace(/[\u{1F3F4}\u{E0060}-\u{E007F}]/gu, "") // bandeiras com tags (Escócia/Inglaterra)
-    .replace(/[🏆🥇🥈🥉]/gu, "")
-    .trim();
-  if (PT_NAMES[s]) s = PT_NAMES[s];
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+// ─── CONVERSÃO DE FUSO → HORÁRIO DE BRASÍLIA ──────────────────────────────────
+// A fonte oficial traz o horário com o fuso embutido e que MUDA por cidade-sede
+// (ex.: "20:30 UTC-4", "13:00 UTC-6"). Aqui convertemos para o horário de
+// Brasília (UTC-3, fixo). Ex.: Brasil x Haiti "20:30 UTC-4" → 21:30 (Brasília).
+function sourceToBrasilia(dateStr, timeStr) {
+  const fallback = { date: dateStr, time: (String(timeStr || "").split(" ")[0] || "00:00") };
+  const mt = String(timeStr || "").trim().match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})(?::?(\d{2}))?$/i);
+  let absMs;
+  if (mt) {
+    const hh = mt[1].padStart(2, "0"), mm = mt[2];
+    const offH = parseInt(mt[3], 10);
+    const sign = offH < 0 ? "-" : "+";
+    const offHH = String(Math.abs(offH)).padStart(2, "0");
+    const offMM = mt[4] || "00";
+    absMs = new Date(`${dateStr}T${hh}:${mm}:00${sign}${offHH}:${offMM}`).getTime();
+  } else {
+    // Sem fuso informado: assume que já está em horário de Brasília.
+    absMs = new Date(`${dateStr}T${fallback.time}:00-03:00`).getTime();
+  }
+  if (isNaN(absMs)) return fallback;
+  // Desloca -3h para que os campos UTC representem o relógio de Brasília.
+  const b = new Date(absMs - 3 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return {
+    date: `${b.getUTCFullYear()}-${p(b.getUTCMonth() + 1)}-${p(b.getUTCDate())}`,
+    time: `${p(b.getUTCHours())}:${p(b.getUTCMinutes())}`,
+  };
 }
 
 // ─── ROUND → PHASE MAP ─────────────────────────────────────────────────────────
@@ -230,58 +246,44 @@ function mapRoundToPhase(round) {
 
 // ─── FETCH REAL WORLD CUP 2026 FIXTURES (free, no API key) ─────────────────────
 // Source: openfootball/worldcup.json — public domain (CC0), updated daily.
+// Os horários são convertidos para Brasília e os placares lidos de score.ft.
 async function fetchMatchesFromAI() {
   const res = await fetch("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json");
   if (!res.ok) throw new Error("Falha ao buscar dados");
   const data = await res.json();
-  return data.matches.map((m, i) => ({
-    id: m.num ? 1000 + Number(m.num) : i + 1,
-    phase: mapRoundToPhase(m.round),
-    group: m.group ? m.group.replace("Group ", "") : null,
-    date: m.date,
-    time: (m.time || "").split(" ")[0] || "00:00",
-    home: flagify(m.team1),
-    away: flagify(m.team2),
-    homeScore: typeof m.score1 === "number" ? m.score1 : null,
-    awayScore: typeof m.score2 === "number" ? m.score2 : null,
-    stadium: m.ground || "",
-  }));
+  return data.matches.map((m, i) => {
+    const { date, time } = sourceToBrasilia(m.date, m.time);
+    const ft = m.score && m.score.ft;
+    return {
+      id: m.num ? 1000 + Number(m.num) : i + 1,
+      phase: mapRoundToPhase(m.round),
+      group: m.group ? m.group.replace("Group ", "") : null,
+      date,
+      time,
+      home: flagify(m.team1),
+      away: flagify(m.team2),
+      homeScore: Array.isArray(ft) && typeof ft[0] === "number" ? ft[0] : null,
+      awayScore: Array.isArray(ft) && typeof ft[1] === "number" ? ft[1] : null,
+      stadium: m.ground || "",
+    };
+  });
 }
 
-// ─── SINCRONIZAR RESULTADOS REAIS DOS JOGOS ENCERRADOS ─────────────────────────
-// Busca os placares oficiais e os mescla nas partidas atuais, casando por ID e,
-// como reserva, pela dupla de times + data. Mantém o resto dos dados intactos.
-async function syncRealResults(currentMatches) {
-  const real = await fetchMatchesFromAI(); // já vem traduzido e com placares
-  const byId = new Map();
-  const byPair = new Map();
-  real.forEach(r => {
-    byId.set(r.id, r);
-    const pair = [canonTeam(r.home), canonTeam(r.away)].sort().join("|");
-    byPair.set(`${r.date}|${pair}`, r);
-    if (!byPair.has(pair)) byPair.set(pair, r); // reserva (sem data)
-  });
-
-  let changed = false;
-  const merged = currentMatches.map(m => {
-    let r = byId.get(m.id);
-    if (!r) {
-      const pair = [canonTeam(m.home), canonTeam(m.away)].sort().join("|");
-      r = byPair.get(`${m.date}|${pair}`) || byPair.get(pair);
+// ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
+// Usa a tabela oficial como base (horários corretos em Brasília + placares reais
+// dos jogos encerrados) e, se a fonte ainda não tiver o placar de um jogo, mantém
+// o placar que o admin tenha lançado manualmente. Casa as partidas pelo id.
+function mergeOfficial(localMatches, official) {
+  const localById = new Map((localMatches || []).map(m => [m.id, m]));
+  return official.map(o => {
+    const prev = localById.get(o.id);
+    let homeScore = o.homeScore, awayScore = o.awayScore;
+    if ((homeScore === null || awayScore === null) && prev && prev.homeScore !== null && prev.awayScore !== null) {
+      homeScore = prev.homeScore;
+      awayScore = prev.awayScore;
     }
-    if (r && r.homeScore !== null && r.awayScore !== null) {
-      // O jogo encontrado pode estar com mandante/visitante invertido — corrige.
-      let hs = r.homeScore, as = r.awayScore;
-      const mHome = canonTeam(m.home), rHome = canonTeam(r.home);
-      if (mHome && rHome && mHome !== rHome) { hs = r.awayScore; as = r.homeScore; }
-      if (m.homeScore !== hs || m.awayScore !== as) {
-        changed = true;
-        return { ...m, homeScore: hs, awayScore: as };
-      }
-    }
-    return m;
+    return { ...o, homeScore, awayScore };
   });
-  return { merged, changed };
 }
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
@@ -358,11 +360,24 @@ export default function BolaoApp() {
         // First run or storage empty — use defaults
       }
       // Restaura o usuário logado salvo neste dispositivo (não derruba no refresh).
+      // Guardamos o objeto do usuário, então a sessão volta mesmo se a lista de
+      // usuários demorar ou falhar ao carregar do servidor.
       try {
-        const savedId = localStorage.getItem(SESSION_KEY);
-        if (savedId) {
-          const found = finalUsers.find(x => String(x.id) === savedId && !x.inactive);
-          if (found) { setCurrentUser(found); setScreen("home"); }
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (raw) {
+          let saved = null;
+          try { saved = JSON.parse(raw); } catch { saved = null; }
+          // compatibilidade com versão antiga (guardava só o id como texto)
+          if (saved == null && /^\d+$/.test(raw)) saved = { id: Number(raw) };
+          if (saved && saved.id != null) {
+            const inList = finalUsers.find(x => String(x.id) === String(saved.id));
+            if (inList && inList.inactive) {
+              localStorage.removeItem(SESSION_KEY); // conta foi desativada
+            } else {
+              setCurrentUser(inList || saved); // usa dados do servidor se houver
+              setScreen("home");
+            }
+          }
         }
       } catch {}
       sessionRestoredRef.current = true;
@@ -375,8 +390,12 @@ export default function BolaoApp() {
   useEffect(() => {
     if (!sessionRestoredRef.current) return; // ignora a montagem inicial (currentUser=null)
     try {
-      if (currentUser) localStorage.setItem(SESSION_KEY, String(currentUser.id));
-      else localStorage.removeItem(SESSION_KEY);
+      if (currentUser) {
+        const { id, username, displayName, isAdmin } = currentUser;
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ id, username, displayName, isAdmin }));
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+      }
     } catch {}
   }, [currentUser]);
 
@@ -426,22 +445,29 @@ export default function BolaoApp() {
     return () => clearInterval(t);
   }, [storageReady]);
 
-  // ── RESULTADOS REAIS: busca os placares oficiais e mescla nos jogos (auto) ──
+  // ── RESULTADOS REAIS + HORÁRIOS: adota a tabela oficial automaticamente ──
+  // Busca a tabela oficial (horários já em Brasília e placares dos jogos
+  // encerrados) e grava no Supabase para todos verem, sem o admin precisar fazer
+  // nada. Preserva placares manuais quando a fonte ainda não tem o resultado.
   useEffect(() => {
     if (!storageReady) return;
     let cancelled = false;
     const run = async () => {
       try {
-        // pega a versão mais recente do Supabase para não sobrescrever edições
+        const official = await fetchMatchesFromAI();
+        if (cancelled || !official.length) return;
+        let baseStr = null;
         let base = matches;
         try {
           const remote = await storage.get("bolao:matches");
-          if (remote) base = JSON.parse(remote.value);
+          if (remote) { base = JSON.parse(remote.value); baseStr = remote.value; }
         } catch {}
-        const { merged, changed } = await syncRealResults(base);
-        if (cancelled || !changed) return;
-        setMatches(merged);
-        storage.set("bolao:matches", JSON.stringify(merged)).catch(() => {});
+        const merged = mergeOfficial(base, official);
+        const mergedStr = JSON.stringify(merged);
+        if (mergedStr !== (baseStr ?? JSON.stringify(base))) {
+          setMatches(merged);
+          storage.set("bolao:matches", mergedStr).catch(() => {});
+        }
       } catch {}
     };
     run();
