@@ -726,7 +726,12 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
 // ─── PREDICTIONS ──────────────────────────────────────────────────────────────
 function PredictionsScreen({ currentUser, users, matches, phases, activePhase, setActivePhase, tempPredictions, setTempPredictions, predictions, handleSavePredictions, savedAlert, setScreen, now }) {
   const mult = PHASE_MULTIPLIERS[activePhase] || 1;
-  const filtered = matches.filter(m => m.phase === activePhase);
+  const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
+    const aLocked = isLocked(a);
+    const bLocked = isLocked(b);
+    if (aLocked !== bLocked) return aLocked ? 1 : -1; // open matches first, locked/finished go last
+    return matchDateTime(a) - matchDateTime(b); // within each group, soonest first
+  });
   const savedPreds = predictions[currentUser.id] || {};
   const [modalMatch, setModalMatch] = useState(null);
 
