@@ -66,6 +66,7 @@ const PHASE_MULTIPLIERS = {
 const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
+const SESSION_KEY = "bolao:session"; // guarda o id do usuário logado neste dispositivo
 
 const INITIAL_MATCHES = [
   // ── Fase de Grupos ──
@@ -104,8 +105,20 @@ const INITIAL_MATCHES = [
 ];
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
+// IMPORTANT: os horários dos jogos são SEMPRE tratados como horário de Brasília
+// (UTC-3, fixo — o Brasil não adota mais horário de verão desde 2019).
+// Sem o offset "-03:00" o JavaScript interpretaria a data no fuso do
+// dispositivo/servidor (muitas vezes UTC), o que fazia a contagem regressiva
+// ficar errada (ex.: dizer "faltam 30min" quando ainda faltavam horas).
+const BRASILIA_OFFSET = "-03:00";
 function matchDateTime(m) {
-  return new Date(`${m.date}T${m.time}:00`);
+  return new Date(`${m.date}T${m.time}:00${BRASILIA_OFFSET}`);
+}
+// Formata "2026-06-11" + "16:00" como "11/06 16:00"
+function fmtMatchDate(m) {
+  const parts = (m.date || "").split("-");
+  if (parts.length === 3) return `${parts[2]}/${parts[1]} ${m.time}`;
+  return `${m.date} ${m.time}`;
 }
 function minutesUntilMatch(m) {
   return (matchDateTime(m) - Date.now()) / 60000;
@@ -161,7 +174,46 @@ const FLAGS = {
 function flagify(team) {
   if (!team) return team;
   const flag = FLAGS[team];
-  return flag ? `${flag} ${team}` : `🏆 ${team}`;
+  const ptName = PT_NAMES[team] || team;
+  return flag ? `${flag} ${ptName}` : `🏆 ${ptName}`;
+}
+
+// ─── NOMES DOS PAÍSES EM PORTUGUÊS (BR) ───────────────────────────────────────
+// Mapeia o nome em inglês (como vem da fonte oficial) para português do Brasil.
+const PT_NAMES = {
+  "Mexico": "México", "South Africa": "África do Sul", "South Korea": "Coreia do Sul",
+  "Korea Republic": "Coreia do Sul", "Czech Republic": "República Tcheca",
+  "Canada": "Canadá", "Qatar": "Catar", "Switzerland": "Suíça", "Brazil": "Brasil",
+  "Morocco": "Marrocos", "Haiti": "Haiti", "Scotland": "Escócia", "USA": "EUA",
+  "United States": "EUA", "Paraguay": "Paraguai", "Australia": "Austrália",
+  "Germany": "Alemanha", "Curaçao": "Curaçao", "Ivory Coast": "Costa do Marfim",
+  "Côte d'Ivoire": "Costa do Marfim", "Ecuador": "Equador", "Netherlands": "Holanda",
+  "Japan": "Japão", "Tunisia": "Tunísia", "Belgium": "Bélgica", "Egypt": "Egito",
+  "Iran": "Irã", "IR Iran": "Irã", "New Zealand": "Nova Zelândia", "Spain": "Espanha",
+  "Cape Verde": "Cabo Verde", "Saudi Arabia": "Arábia Saudita", "Uruguay": "Uruguai",
+  "France": "França", "Senegal": "Senegal", "Norway": "Noruega", "Argentina": "Argentina",
+  "Algeria": "Argélia", "Austria": "Áustria", "Jordan": "Jordânia", "Portugal": "Portugal",
+  "Uzbekistan": "Uzbequistão", "Colombia": "Colômbia", "England": "Inglaterra",
+  "Croatia": "Croácia", "Ghana": "Gana", "Panama": "Panamá",
+  // extras comuns
+  "Italy": "Itália", "Poland": "Polônia", "Denmark": "Dinamarca", "Sweden": "Suécia",
+  "Turkey": "Turquia", "Türkiye": "Turquia", "Greece": "Grécia", "Serbia": "Sérvia",
+  "Nigeria": "Nigéria", "Cameroon": "Camarões", "Peru": "Peru", "Chile": "Chile",
+  "Costa Rica": "Costa Rica", "Wales": "País de Gales", "Ukraine": "Ucrânia",
+  "Russia": "Rússia", "China": "China", "India": "Índia", "Israel": "Israel",
+};
+
+// Normaliza um nome de time (remove bandeira/emoji, traduz EN→PT, tira acentos)
+// para comparar partidas vindas de fontes diferentes de forma confiável.
+function canonTeam(name) {
+  if (!name) return "";
+  let s = name
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, "")        // bandeiras (regional indicators)
+    .replace(/[\u{1F3F4}\u{E0060}-\u{E007F}]/gu, "") // bandeiras com tags (Escócia/Inglaterra)
+    .replace(/[🏆🥇🥈🥉]/gu, "")
+    .trim();
+  if (PT_NAMES[s]) s = PT_NAMES[s];
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 }
 
 // ─── ROUND → PHASE MAP ─────────────────────────────────────────────────────────
@@ -194,6 +246,42 @@ async function fetchMatchesFromAI() {
     awayScore: typeof m.score2 === "number" ? m.score2 : null,
     stadium: m.ground || "",
   }));
+}
+
+// ─── SINCRONIZAR RESULTADOS REAIS DOS JOGOS ENCERRADOS ─────────────────────────
+// Busca os placares oficiais e os mescla nas partidas atuais, casando por ID e,
+// como reserva, pela dupla de times + data. Mantém o resto dos dados intactos.
+async function syncRealResults(currentMatches) {
+  const real = await fetchMatchesFromAI(); // já vem traduzido e com placares
+  const byId = new Map();
+  const byPair = new Map();
+  real.forEach(r => {
+    byId.set(r.id, r);
+    const pair = [canonTeam(r.home), canonTeam(r.away)].sort().join("|");
+    byPair.set(`${r.date}|${pair}`, r);
+    if (!byPair.has(pair)) byPair.set(pair, r); // reserva (sem data)
+  });
+
+  let changed = false;
+  const merged = currentMatches.map(m => {
+    let r = byId.get(m.id);
+    if (!r) {
+      const pair = [canonTeam(m.home), canonTeam(m.away)].sort().join("|");
+      r = byPair.get(`${m.date}|${pair}`) || byPair.get(pair);
+    }
+    if (r && r.homeScore !== null && r.awayScore !== null) {
+      // O jogo encontrado pode estar com mandante/visitante invertido — corrige.
+      let hs = r.homeScore, as = r.awayScore;
+      const mHome = canonTeam(m.home), rHome = canonTeam(r.home);
+      if (mHome && rHome && mHome !== rHome) { hs = r.awayScore; as = r.homeScore; }
+      if (m.homeScore !== hs || m.awayScore !== as) {
+        changed = true;
+        return { ...m, homeScore: hs, awayScore: as };
+      }
+    }
+    return m;
+  });
+  return { merged, changed };
 }
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
@@ -245,10 +333,12 @@ export default function BolaoApp() {
   const [now, setNow] = useState(Date.now());
   const [toasts, setToasts] = useState([]);
   const notifiedRef = useRef(new Set());
+  const sessionRestoredRef = useRef(false); // evita apagar a sessão antes de restaurá-la
 
   // ── LOAD FROM STORAGE ──
   useEffect(() => {
     async function load() {
+      let finalUsers = DEFAULT_USERS;
       try {
         const [u, m, p] = await Promise.all([
           storage.get("bolao:users"),
@@ -259,6 +349,7 @@ export default function BolaoApp() {
           const loaded = JSON.parse(u.value);
           // Always ensure admin user is present with current credentials
           const withAdmin = [ADMIN_USER, ...loaded.filter(x => !x.isAdmin)];
+          finalUsers = withAdmin;
           setUsers(withAdmin);
         }
         if (m) setMatches(JSON.parse(m.value));
@@ -266,10 +357,28 @@ export default function BolaoApp() {
       } catch(e) {
         // First run or storage empty — use defaults
       }
+      // Restaura o usuário logado salvo neste dispositivo (não derruba no refresh).
+      try {
+        const savedId = localStorage.getItem(SESSION_KEY);
+        if (savedId) {
+          const found = finalUsers.find(x => String(x.id) === savedId && !x.inactive);
+          if (found) { setCurrentUser(found); setScreen("home"); }
+        }
+      } catch {}
+      sessionRestoredRef.current = true;
       setStorageReady(true);
     }
     load();
   }, []);
+
+  // ── PERSISTE / LIMPA A SESSÃO QUANDO O USUÁRIO LOGA OU SAI ──
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return; // ignora a montagem inicial (currentUser=null)
+    try {
+      if (currentUser) localStorage.setItem(SESSION_KEY, String(currentUser.id));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch {}
+  }, [currentUser]);
 
   // ── SAVE USERS TO STORAGE ──
   useEffect(() => {
@@ -315,6 +424,30 @@ export default function BolaoApp() {
     };
     const t = setInterval(sync, 20000);
     return () => clearInterval(t);
+  }, [storageReady]);
+
+  // ── RESULTADOS REAIS: busca os placares oficiais e mescla nos jogos (auto) ──
+  useEffect(() => {
+    if (!storageReady) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        // pega a versão mais recente do Supabase para não sobrescrever edições
+        let base = matches;
+        try {
+          const remote = await storage.get("bolao:matches");
+          if (remote) base = JSON.parse(remote.value);
+        } catch {}
+        const { merged, changed } = await syncRealResults(base);
+        if (cancelled || !changed) return;
+        setMatches(merged);
+        storage.set("bolao:matches", JSON.stringify(merged)).catch(() => {});
+      } catch {}
+    };
+    run();
+    const t = setInterval(run, 120000); // a cada 2 minutos
+    return () => { cancelled = true; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
   // Notification checker
@@ -679,7 +812,7 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
       <div onClick={e => e.stopPropagation()} style={{ background: "#0f1e30", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, padding: "20px 20px 40px", border: "1px solid rgba(255,255,255,0.12)", borderBottom: "none", maxHeight: "80vh", overflowY: "auto" }}>
         <div style={{ width: 40, height: 4, background: "#37474f", borderRadius: 2, margin: "0 auto 18px" }} />
         <h3 style={{ margin: "0 0 2px", fontWeight: 800, fontSize: 16, color: "#fff" }}>{match.home} × {match.away}</h3>
-        <p style={{ margin: "0 0 14px", color: "#78909c", fontSize: 12 }}>📅 {match.date} {match.time} • {match.phase} • multiplicador ×{mult}</p>
+        <p style={{ margin: "0 0 14px", color: "#78909c", fontSize: 12 }}>📅 {fmtMatchDate(match)} (Brasília) • {match.phase} • multiplicador ×{mult}</p>
 
         {match.homeScore !== null && (
           <div style={{ background: "rgba(0,188,212,0.1)", border: "1px solid rgba(0,188,212,0.3)", borderRadius: 10, padding: "10px 14px", textAlign: "center", marginBottom: 14 }}>
@@ -756,6 +889,7 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
       <div style={styles.multBadge}>
         <span>📐 Multiplicador: </span><strong style={{ color: "#ffd600" }}>×{mult}</strong>
         <span style={{ marginLeft: 8, color: "#78909c" }}>| Placar: {10*mult}pts | Resultado: {5*mult}pts</span>
+        <div style={{ color: "#546e7a", fontSize: 10, marginTop: 4 }}>🕐 Todos os horários no horário de Brasília</div>
       </div>
 
       <div style={styles.tabRow}>
@@ -783,7 +917,7 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
               style={{ ...styles.matchCard, ...(locked ? { borderColor: "rgba(239,83,80,0.25)", cursor: "pointer" } : closingSoon ? { borderColor: "rgba(255,152,0,0.4)", boxShadow: "0 0 0 1px rgba(255,152,0,0.2)" } : {}) }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 4 }}>
-                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
+                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
                 {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
                 {locked && m.homeScore === null && <span style={{ background: "rgba(239,83,80,0.15)", color: "#ef5350", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>🔒 Toque p/ ver palpites</span>}
                 {locked && m.homeScore !== null && <span style={{ background: "rgba(76,175,80,0.15)", color: "#4caf50", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>✅ Toque p/ ver resultados</span>}
@@ -882,10 +1016,13 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
         ))}
       </div>
       <div style={{ padding: "0 16px 32px" }}>
+        <p style={{ color: "#546e7a", fontSize: 11, textAlign: "center", margin: "10px 0 2px" }}>
+          ✅ Resultados oficiais atualizados automaticamente • horário de Brasília
+        </p>
         {filtered.map(m => (
           <div key={m.id} style={styles.matchCard}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
+              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
               {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
               {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando...</span>}
             </div>
@@ -1027,7 +1164,7 @@ function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScre
               {aiMatches.map((m, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#90a4ae", background: "rgba(255,255,255,0.03)", borderRadius: 6, padding: "4px 8px" }}>
                   <span>{m.home} × {m.away}</span>
-                  <span>{m.date} {m.time}</span>
+                  <span>{fmtMatchDate(m)}</span>
                 </div>
               ))}
             </div>
@@ -1051,7 +1188,7 @@ function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScre
         {filtered.map(m => (
           <div key={m.id} style={styles.adminMatchCard}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
+              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
               {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ {m.homeScore}×{m.awayScore}</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando</span>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
