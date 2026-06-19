@@ -342,9 +342,12 @@ export default function BolaoApp() {
   }
   function removeToast(id) { setToasts(p => p.filter(t => t.id !== id)); }
 
-  // Load user predictions into temp
+  // Load user predictions into temp (runs only when the logged-in user changes)
+  const predictionsRef = useRef(predictions);
+  predictionsRef.current = predictions;
   useEffect(() => {
-    if (currentUser) setTempPredictions({ ...(predictions[currentUser.id] || {}) });
+    if (currentUser) setTempPredictions({ ...(predictionsRef.current[currentUser.id] || {}) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   const ranking = users.filter(u => !u.isAdmin && !u.inactive).map(u => {
