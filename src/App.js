@@ -1029,8 +1029,21 @@ function RankingScreen({ ranking, currentUser, setScreen }) {
 }
 
 // ─── RESULTS ──────────────────────────────────────────────────────────────────
-function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase }) {
-  const filtered = matches.filter(m => m.phase === activePhase);
+function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase, now }) {
+  const [expanded, setExpanded] = useState({}); // { [matchId]: true } — palpites abertos
+  const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
+
+  // Ordena: jogos que já começaram ficam no topo (mais recente primeiro), e o que
+  // acabou de começar fica em 1º até o próximo começar. Os que ainda vão acontecer
+  // ficam abaixo, em ordem cronológica.
+  const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
+    const aStarted = matchDateTime(a).getTime() <= now;
+    const bStarted = matchDateTime(b).getTime() <= now;
+    if (aStarted !== bStarted) return aStarted ? -1 : 1;
+    if (aStarted) return matchDateTime(b) - matchDateTime(a); // já começaram: mais recente primeiro
+    return matchDateTime(a) - matchDateTime(b);               // a começar: mais próximo primeiro
+  });
+
   return (
     <div style={styles.page}>
       <TopBar title="📊 Resultados" onBack={() => setScreen(currentUser ? "home" : "landing")} />
@@ -1045,47 +1058,78 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
         <p style={{ color: "#546e7a", fontSize: 11, textAlign: "center", margin: "10px 0 2px" }}>
           ✅ Resultados oficiais atualizados automaticamente • horário de Brasília
         </p>
-        {filtered.map(m => (
-          <div key={m.id} style={styles.matchCard}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
-              {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
-              {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando...</span>}
-            </div>
-            <div style={styles.matchRow}>
-              <span style={styles.team}>{m.home}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                {m.homeScore !== null ? (
-                  <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
-                ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
+        {filtered.map(m => {
+          const finished = m.homeScore !== null;
+          const started = matchDateTime(m).getTime() <= now;
+          const locked = isLocked(m); // palpites encerrados (10min antes do jogo)
+          const isOpen = !!expanded[m.id];
+          const predCount = users.filter(u => hasPred(predictions[u.id]?.[m.id])).length;
+
+          let status;
+          if (finished) status = <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span>;
+          else if (started) status = <span style={{ color: "#ff7043", fontSize: 11, fontWeight: 700 }}>🔴 Em andamento</span>;
+          else if (locked) status = <span style={{ color: "#ef5350", fontSize: 11, fontWeight: 700 }}>🔒 Encerrado p/ palpite</span>;
+          else status = <span style={{ color: "#546e7a", fontSize: 11 }}>🕐 Em breve</span>;
+
+          return (
+            <div key={m.id} style={styles.matchCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
+                {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
+                {status}
               </div>
-              <span style={styles.team}>{m.away}</span>
-            </div>
-            {m.homeScore !== null && users.length > 0 && (
-              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                {users.map(u => {
-                  const pred = predictions[u.id]?.[m.id];
-                  const noPred = !hasPred(pred);
-                  const pts = noPred ? 0 : calcPoints(pred, m, m.phase);
-                  const res = noPred ? null : getResultLabel(pts, m.phase);
-                  return (
-                    <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                      <Avatar name={u.displayName} size={22} />
-                      <span style={{ marginLeft: 8, fontSize: 12, color: "#90a4ae", flex: 1 }}>{u.displayName}</span>
-                      {noPred
-                        ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
-                        : <>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
-                            <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>
-                          </>
-                      }
+              <div style={styles.matchRow}>
+                <span style={styles.team}>{m.home}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {finished ? (
+                    <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
+                  ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
+                </div>
+                <span style={styles.team}>{m.away}</span>
+              </div>
+
+              {/* Palpites só ficam disponíveis depois que o jogo fecha (palpites encerrados) */}
+              {locked && users.length > 0 && (
+                <>
+                  <button onClick={() => toggle(m.id)} style={styles.expandBtn}>
+                    {isOpen ? "🙈 Ocultar palpites" : `👁 Ver palpites (${predCount})`}
+                    <span style={{ marginLeft: 6, transition: "transform 0.2s", display: "inline-block", transform: isOpen ? "rotate(180deg)" : "none" }}>▾</span>
+                  </button>
+                  {isOpen && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                      {[...users]
+                        .map(u => {
+                          const pred = predictions[u.id]?.[m.id];
+                          const noPred = !hasPred(pred);
+                          const pts = (!noPred && finished) ? calcPoints(pred, m, m.phase) : null;
+                          return { u, pred, noPred, pts };
+                        })
+                        .sort((a, b) => (b.pts ?? -1) - (a.pts ?? -1) || (a.noPred - b.noPred))
+                        .map(({ u, pred, noPred, pts }) => {
+                          const res = pts !== null ? getResultLabel(pts, m.phase) : null;
+                          return (
+                            <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                              <Avatar name={u.displayName} size={22} />
+                              <span style={{ marginLeft: 8, fontSize: 12, color: noPred ? "#546e7a" : "#90a4ae", flex: 1 }}>
+                                {u.displayName}{currentUser?.id === u.id && " (você)"}
+                              </span>
+                              {noPred
+                                ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
+                                : <>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
+                                    {res && <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
+                                  </>
+                              }
+                            </div>
+                          );
+                        })}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1295,4 +1339,5 @@ const styles = {
   rankSecond: { background: "rgba(207,216,220,0.06)", border: "1px solid rgba(207,216,220,0.2)" },
   rankThird: { background: "rgba(255,152,0,0.06)", border: "1px solid rgba(255,152,0,0.2)" },
   adminMatchCard: { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "12px", marginBottom: 10 },
+  expandBtn: { marginTop: 10, width: "100%", background: "rgba(0,188,212,0.08)", border: "1px solid rgba(0,188,212,0.25)", borderRadius: 10, color: "#4dd0e1", padding: "8px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
 };
