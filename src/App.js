@@ -66,20 +66,19 @@ const PHASE_MULTIPLIERS = {
 const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
-const SESSION_KEY = "bolao:session"; // guarda o id do usuário logado neste dispositivo
 
 const INITIAL_MATCHES = [
-  // ── Fase de Grupos ──
-  { id: 1,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "15:00", home: "🇺🇸 EUA",       away: "🇲🇽 México",      homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
-  { id: 2,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "18:00", home: "🇨🇦 Canadá",   away: "🇨🇴 Colômbia",    homeScore: null, awayScore: null, stadium: "BMO Field" },
-  { id: 3,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "15:00", home: "🇧🇷 Brasil",   away: "🇩🇪 Alemanha",    homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
-  { id: 4,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "18:00", home: "🇦🇷 Argentina",away: "🇫🇷 França",      homeScore: null, awayScore: null, stadium: "Rose Bowl" },
-  { id: 5,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "15:00", home: "🇪🇸 Espanha",  away: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra",homeScore: null, awayScore: null, stadium: "AT&T Stadium" },
-  { id: 6,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "18:00", home: "🇵🇹 Portugal", away: "🇳🇱 Holanda",    homeScore: null, awayScore: null, stadium: "Levi's Stadium" },
-  { id: 7,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "15:00", home: "🇯🇵 Japão",    away: "🇸🇦 Arábia",     homeScore: null, awayScore: null, stadium: "Mercedes-Benz Stadium" },
-  { id: 8,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "18:00", home: "🇲🇦 Marrocos", away: "🇸🇳 Senegal",    homeScore: null, awayScore: null, stadium: "Estadio Azteca" },
-  { id: 9,  phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "15:00", home: "🇧🇷 Brasil",   away: "🇨🇴 Colômbia",   homeScore: null, awayScore: null, stadium: "Hard Rock Stadium" },
-  { id: 10, phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "18:00", home: "🇩🇪 Alemanha", away: "🇨🇦 Canadá",     homeScore: null, awayScore: null, stadium: "Gillette Stadium" },
+  // ── Fase de Grupos (horários em UTC; convertidos automaticamente para o fuso de cada usuário) ──
+  { id: 1,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "18:00", home: "🇺🇸 EUA",       away: "🇲🇽 México",      homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
+  { id: 2,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "21:00", home: "🇨🇦 Canadá",   away: "🇨🇴 Colômbia",    homeScore: null, awayScore: null, stadium: "BMO Field" },
+  { id: 3,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "18:00", home: "🇧🇷 Brasil",   away: "🇩🇪 Alemanha",    homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
+  { id: 4,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "21:00", home: "🇦🇷 Argentina",away: "🇫🇷 França",      homeScore: null, awayScore: null, stadium: "Rose Bowl" },
+  { id: 5,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "18:00", home: "🇪🇸 Espanha",  away: "🏴 Inglaterra",   homeScore: null, awayScore: null, stadium: "AT&T Stadium" },
+  { id: 6,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "21:00", home: "🇵🇹 Portugal", away: "🇳🇱 Holanda",    homeScore: null, awayScore: null, stadium: "Levi's Stadium" },
+  { id: 7,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "18:00", home: "🇯🇵 Japão",    away: "🇸🇦 Arábia",     homeScore: null, awayScore: null, stadium: "Mercedes-Benz Stadium" },
+  { id: 8,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "21:00", home: "🇲🇦 Marrocos", away: "🇸🇳 Senegal",    homeScore: null, awayScore: null, stadium: "Estadio Azteca" },
+  { id: 9,  phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "18:00", home: "🇧🇷 Brasil",   away: "🇨🇴 Colômbia",   homeScore: null, awayScore: null, stadium: "Hard Rock Stadium" },
+  { id: 10, phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "21:00", home: "🇩🇪 Alemanha", away: "🇨🇦 Canadá",     homeScore: null, awayScore: null, stadium: "Gillette Stadium" },
   // ── Segunda Fase ──
   { id: 51, phase: "Segunda Fase", group: null, date: "2026-06-27", time: "15:00", home: "🏆 1º Grupo A", away: "🥈 2º Grupo C", homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
   { id: 52, phase: "Segunda Fase", group: null, date: "2026-06-27", time: "19:00", home: "🏆 1º Grupo B", away: "🥈 2º Grupo D", homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
@@ -105,20 +104,14 @@ const INITIAL_MATCHES = [
 ];
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
-// IMPORTANT: os horários dos jogos são SEMPRE tratados como horário de Brasília
-// (UTC-3, fixo — o Brasil não adota mais horário de verão desde 2019).
-// Sem o offset "-03:00" o JavaScript interpretaria a data no fuso do
-// dispositivo/servidor (muitas vezes UTC), o que fazia a contagem regressiva
-// ficar errada (ex.: dizer "faltam 30min" quando ainda faltavam horas).
-const BRASILIA_OFFSET = "-03:00";
 function matchDateTime(m) {
-  return new Date(`${m.date}T${m.time}:00${BRASILIA_OFFSET}`);
+  return new Date(`${m.date}T${m.time}:00Z`);
 }
-// Formata "2026-06-11" + "16:00" como "11/06 16:00"
-function fmtMatchDate(m) {
-  const parts = (m.date || "").split("-");
-  if (parts.length === 3) return `${parts[2]}/${parts[1]} ${m.time}`;
-  return `${m.date} ${m.time}`;
+function matchLocalDisplay(m) {
+  const d = matchDateTime(m);
+  const date = d.toLocaleDateString("pt-BR");
+  const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return { date, time };
 }
 function minutesUntilMatch(m) {
   return (matchDateTime(m) - Date.now()) / 60000;
@@ -174,62 +167,7 @@ const FLAGS = {
 function flagify(team) {
   if (!team) return team;
   const flag = FLAGS[team];
-  const ptName = PT_NAMES[team] || team;
-  return flag ? `${flag} ${ptName}` : `🏆 ${ptName}`;
-}
-
-// ─── NOMES DOS PAÍSES EM PORTUGUÊS (BR) ───────────────────────────────────────
-// Mapeia o nome em inglês (como vem da fonte oficial) para português do Brasil.
-const PT_NAMES = {
-  "Mexico": "México", "South Africa": "África do Sul", "South Korea": "Coreia do Sul",
-  "Korea Republic": "Coreia do Sul", "Czech Republic": "República Tcheca",
-  "Canada": "Canadá", "Qatar": "Catar", "Switzerland": "Suíça", "Brazil": "Brasil",
-  "Morocco": "Marrocos", "Haiti": "Haiti", "Scotland": "Escócia", "USA": "EUA",
-  "United States": "EUA", "Paraguay": "Paraguai", "Australia": "Austrália",
-  "Germany": "Alemanha", "Curaçao": "Curaçao", "Ivory Coast": "Costa do Marfim",
-  "Côte d'Ivoire": "Costa do Marfim", "Ecuador": "Equador", "Netherlands": "Holanda",
-  "Japan": "Japão", "Tunisia": "Tunísia", "Belgium": "Bélgica", "Egypt": "Egito",
-  "Iran": "Irã", "IR Iran": "Irã", "New Zealand": "Nova Zelândia", "Spain": "Espanha",
-  "Cape Verde": "Cabo Verde", "Saudi Arabia": "Arábia Saudita", "Uruguay": "Uruguai",
-  "France": "França", "Senegal": "Senegal", "Norway": "Noruega", "Argentina": "Argentina",
-  "Algeria": "Argélia", "Austria": "Áustria", "Jordan": "Jordânia", "Portugal": "Portugal",
-  "Uzbekistan": "Uzbequistão", "Colombia": "Colômbia", "England": "Inglaterra",
-  "Croatia": "Croácia", "Ghana": "Gana", "Panama": "Panamá",
-  // extras comuns
-  "Italy": "Itália", "Poland": "Polônia", "Denmark": "Dinamarca", "Sweden": "Suécia",
-  "Turkey": "Turquia", "Türkiye": "Turquia", "Greece": "Grécia", "Serbia": "Sérvia",
-  "Nigeria": "Nigéria", "Cameroon": "Camarões", "Peru": "Peru", "Chile": "Chile",
-  "Costa Rica": "Costa Rica", "Wales": "País de Gales", "Ukraine": "Ucrânia",
-  "Russia": "Rússia", "China": "China", "India": "Índia", "Israel": "Israel",
-};
-
-// ─── CONVERSÃO DE FUSO → HORÁRIO DE BRASÍLIA ──────────────────────────────────
-// A fonte oficial traz o horário com o fuso embutido e que MUDA por cidade-sede
-// (ex.: "20:30 UTC-4", "13:00 UTC-6"). Aqui convertemos para o horário de
-// Brasília (UTC-3, fixo). Ex.: Brasil x Haiti "20:30 UTC-4" → 21:30 (Brasília).
-function sourceToBrasilia(dateStr, timeStr) {
-  const fallback = { date: dateStr, time: (String(timeStr || "").split(" ")[0] || "00:00") };
-  const mt = String(timeStr || "").trim().match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})(?::?(\d{2}))?$/i);
-  let absMs;
-  if (mt) {
-    const hh = mt[1].padStart(2, "0"), mm = mt[2];
-    const offH = parseInt(mt[3], 10);
-    const sign = offH < 0 ? "-" : "+";
-    const offHH = String(Math.abs(offH)).padStart(2, "0");
-    const offMM = mt[4] || "00";
-    absMs = new Date(`${dateStr}T${hh}:${mm}:00${sign}${offHH}:${offMM}`).getTime();
-  } else {
-    // Sem fuso informado: assume que já está em horário de Brasília.
-    absMs = new Date(`${dateStr}T${fallback.time}:00-03:00`).getTime();
-  }
-  if (isNaN(absMs)) return fallback;
-  // Desloca -3h para que os campos UTC representem o relógio de Brasília.
-  const b = new Date(absMs - 3 * 3600 * 1000);
-  const p = (n) => String(n).padStart(2, "0");
-  return {
-    date: `${b.getUTCFullYear()}-${p(b.getUTCMonth() + 1)}-${p(b.getUTCDate())}`,
-    time: `${p(b.getUTCHours())}:${p(b.getUTCMinutes())}`,
-  };
+  return flag ? `${flag} ${team}` : `🏆 ${team}`;
 }
 
 // ─── ROUND → PHASE MAP ─────────────────────────────────────────────────────────
@@ -246,14 +184,12 @@ function mapRoundToPhase(round) {
 
 // ─── FETCH REAL WORLD CUP 2026 FIXTURES (free, no API key) ─────────────────────
 // Source: openfootball/worldcup.json — public domain (CC0), updated daily.
-// Os horários são convertidos para Brasília e os placares lidos de score.ft.
 async function fetchMatchesFromAI() {
   const res = await fetch("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json");
   if (!res.ok) throw new Error("Falha ao buscar dados");
   const data = await res.json();
   return data.matches.map((m, i) => {
-    const { date, time } = sourceToBrasilia(m.date, m.time);
-    const ft = m.score && m.score.ft;
+    const { date, time } = toUtcDateTime(m.date, m.time);
     return {
       id: m.num ? 1000 + Number(m.num) : i + 1,
       phase: mapRoundToPhase(m.round),
@@ -262,28 +198,28 @@ async function fetchMatchesFromAI() {
       time,
       home: flagify(m.team1),
       away: flagify(m.team2),
-      homeScore: Array.isArray(ft) && typeof ft[0] === "number" ? ft[0] : null,
-      awayScore: Array.isArray(ft) && typeof ft[1] === "number" ? ft[1] : null,
+      homeScore: typeof m.score1 === "number" ? m.score1 : null,
+      awayScore: typeof m.score2 === "number" ? m.score2 : null,
       stadium: m.ground || "",
     };
   });
 }
 
-// ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
-// Usa a tabela oficial como base (horários corretos em Brasília + placares reais
-// dos jogos encerrados) e, se a fonte ainda não tiver o placar de um jogo, mantém
-// o placar que o admin tenha lançado manualmente. Casa as partidas pelo id.
-function mergeOfficial(localMatches, official) {
-  const localById = new Map((localMatches || []).map(m => [m.id, m]));
-  return official.map(o => {
-    const prev = localById.get(o.id);
-    let homeScore = o.homeScore, awayScore = o.awayScore;
-    if ((homeScore === null || awayScore === null) && prev && prev.homeScore !== null && prev.awayScore !== null) {
-      homeScore = prev.homeScore;
-      awayScore = prev.awayScore;
-    }
-    return { ...o, homeScore, awayScore };
-  });
+// Converts a "HH:MM UTC±N" source time into UTC date/time strings.
+// Our app always stores date/time in UTC and lets the browser render it
+// in the viewer's local timezone (so Brazilian users see the correct local hour).
+function toUtcDateTime(dateStr, timeStr) {
+  if (!timeStr) return { date: dateStr, time: "00:00" };
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d+)?/);
+  if (!match) return { date: dateStr, time: (timeStr.split(" ")[0] || "00:00") };
+  const [, hh, mm, offsetStr] = match;
+  const offset = offsetStr ? parseInt(offsetStr, 10) : 0;
+  // Local time at the venue = UTC + offset  →  UTC = local time - offset
+  const local = new Date(`${dateStr}T${hh.padStart(2, "0")}:${mm}:00Z`);
+  local.setUTCHours(local.getUTCHours() - offset);
+  const date = local.toISOString().slice(0, 10);
+  const time = local.toISOString().slice(11, 16);
+  return { date, time };
 }
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
@@ -335,12 +271,10 @@ export default function BolaoApp() {
   const [now, setNow] = useState(Date.now());
   const [toasts, setToasts] = useState([]);
   const notifiedRef = useRef(new Set());
-  const sessionRestoredRef = useRef(false); // evita apagar a sessão antes de restaurá-la
 
   // ── LOAD FROM STORAGE ──
   useEffect(() => {
     async function load() {
-      let finalUsers = DEFAULT_USERS;
       try {
         const [u, m, p] = await Promise.all([
           storage.get("bolao:users"),
@@ -351,7 +285,6 @@ export default function BolaoApp() {
           const loaded = JSON.parse(u.value);
           // Always ensure admin user is present with current credentials
           const withAdmin = [ADMIN_USER, ...loaded.filter(x => !x.isAdmin)];
-          finalUsers = withAdmin;
           setUsers(withAdmin);
         }
         if (m) setMatches(JSON.parse(m.value));
@@ -359,45 +292,10 @@ export default function BolaoApp() {
       } catch(e) {
         // First run or storage empty — use defaults
       }
-      // Restaura o usuário logado salvo neste dispositivo (não derruba no refresh).
-      // Guardamos o objeto do usuário, então a sessão volta mesmo se a lista de
-      // usuários demorar ou falhar ao carregar do servidor.
-      try {
-        const raw = localStorage.getItem(SESSION_KEY);
-        if (raw) {
-          let saved = null;
-          try { saved = JSON.parse(raw); } catch { saved = null; }
-          // compatibilidade com versão antiga (guardava só o id como texto)
-          if (saved == null && /^\d+$/.test(raw)) saved = { id: Number(raw) };
-          if (saved && saved.id != null) {
-            const inList = finalUsers.find(x => String(x.id) === String(saved.id));
-            if (inList && inList.inactive) {
-              localStorage.removeItem(SESSION_KEY); // conta foi desativada
-            } else {
-              setCurrentUser(inList || saved); // usa dados do servidor se houver
-              setScreen("home");
-            }
-          }
-        }
-      } catch {}
-      sessionRestoredRef.current = true;
       setStorageReady(true);
     }
     load();
   }, []);
-
-  // ── PERSISTE / LIMPA A SESSÃO QUANDO O USUÁRIO LOGA OU SAI ──
-  useEffect(() => {
-    if (!sessionRestoredRef.current) return; // ignora a montagem inicial (currentUser=null)
-    try {
-      if (currentUser) {
-        const { id, username, displayName, isAdmin } = currentUser;
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ id, username, displayName, isAdmin }));
-      } else {
-        localStorage.removeItem(SESSION_KEY);
-      }
-    } catch {}
-  }, [currentUser]);
 
   // ── SAVE USERS TO STORAGE ──
   useEffect(() => {
@@ -443,37 +341,6 @@ export default function BolaoApp() {
     };
     const t = setInterval(sync, 20000);
     return () => clearInterval(t);
-  }, [storageReady]);
-
-  // ── RESULTADOS REAIS + HORÁRIOS: adota a tabela oficial automaticamente ──
-  // Busca a tabela oficial (horários já em Brasília e placares dos jogos
-  // encerrados) e grava no Supabase para todos verem, sem o admin precisar fazer
-  // nada. Preserva placares manuais quando a fonte ainda não tem o resultado.
-  useEffect(() => {
-    if (!storageReady) return;
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const official = await fetchMatchesFromAI();
-        if (cancelled || !official.length) return;
-        let baseStr = null;
-        let base = matches;
-        try {
-          const remote = await storage.get("bolao:matches");
-          if (remote) { base = JSON.parse(remote.value); baseStr = remote.value; }
-        } catch {}
-        const merged = mergeOfficial(base, official);
-        const mergedStr = JSON.stringify(merged);
-        if (mergedStr !== (baseStr ?? JSON.stringify(base))) {
-          setMatches(merged);
-          storage.set("bolao:matches", mergedStr).catch(() => {});
-        }
-      } catch {}
-    };
-    run();
-    const t = setInterval(run, 120000); // a cada 2 minutos
-    return () => { cancelled = true; clearInterval(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
   // Notification checker
@@ -838,7 +705,7 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
       <div onClick={e => e.stopPropagation()} style={{ background: "#0f1e30", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, padding: "20px 20px 40px", border: "1px solid rgba(255,255,255,0.12)", borderBottom: "none", maxHeight: "80vh", overflowY: "auto" }}>
         <div style={{ width: 40, height: 4, background: "#37474f", borderRadius: 2, margin: "0 auto 18px" }} />
         <h3 style={{ margin: "0 0 2px", fontWeight: 800, fontSize: 16, color: "#fff" }}>{match.home} × {match.away}</h3>
-        <p style={{ margin: "0 0 14px", color: "#78909c", fontSize: 12 }}>📅 {fmtMatchDate(match)} (Brasília) • {match.phase} • multiplicador ×{mult}</p>
+        <p style={{ margin: "0 0 14px", color: "#78909c", fontSize: 12 }}>📅 {match.date} {match.time} • {match.phase} • multiplicador ×{mult}</p>
 
         {match.homeScore !== null && (
           <div style={{ background: "rgba(0,188,212,0.1)", border: "1px solid rgba(0,188,212,0.3)", borderRadius: 10, padding: "10px 14px", textAlign: "center", marginBottom: 14 }}>
@@ -915,7 +782,6 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
       <div style={styles.multBadge}>
         <span>📐 Multiplicador: </span><strong style={{ color: "#ffd600" }}>×{mult}</strong>
         <span style={{ marginLeft: 8, color: "#78909c" }}>| Placar: {10*mult}pts | Resultado: {5*mult}pts</span>
-        <div style={{ color: "#546e7a", fontSize: 10, marginTop: 4 }}>🕐 Todos os horários no horário de Brasília</div>
       </div>
 
       <div style={styles.tabRow}>
@@ -943,7 +809,7 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
               style={{ ...styles.matchCard, ...(locked ? { borderColor: "rgba(239,83,80,0.25)", cursor: "pointer" } : closingSoon ? { borderColor: "rgba(255,152,0,0.4)", boxShadow: "0 0 0 1px rgba(255,152,0,0.2)" } : {}) }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 4 }}>
-                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
+                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
                 {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
                 {locked && m.homeScore === null && <span style={{ background: "rgba(239,83,80,0.15)", color: "#ef5350", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>🔒 Toque p/ ver palpites</span>}
                 {locked && m.homeScore !== null && <span style={{ background: "rgba(76,175,80,0.15)", color: "#4caf50", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>✅ Toque p/ ver resultados</span>}
@@ -1029,21 +895,8 @@ function RankingScreen({ ranking, currentUser, setScreen }) {
 }
 
 // ─── RESULTS ──────────────────────────────────────────────────────────────────
-function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase, now }) {
-  const [expanded, setExpanded] = useState({}); // { [matchId]: true } — palpites abertos
-  const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
-
-  // Ordena: jogos que já começaram ficam no topo (mais recente primeiro), e o que
-  // acabou de começar fica em 1º até o próximo começar. Os que ainda vão acontecer
-  // ficam abaixo, em ordem cronológica.
-  const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
-    const aStarted = matchDateTime(a).getTime() <= now;
-    const bStarted = matchDateTime(b).getTime() <= now;
-    if (aStarted !== bStarted) return aStarted ? -1 : 1;
-    if (aStarted) return matchDateTime(b) - matchDateTime(a); // já começaram: mais recente primeiro
-    return matchDateTime(a) - matchDateTime(b);               // a começar: mais próximo primeiro
-  });
-
+function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase }) {
+  const filtered = matches.filter(m => m.phase === activePhase);
   return (
     <div style={styles.page}>
       <TopBar title="📊 Resultados" onBack={() => setScreen(currentUser ? "home" : "landing")} />
@@ -1055,81 +908,114 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
         ))}
       </div>
       <div style={{ padding: "0 16px 32px" }}>
-        <p style={{ color: "#546e7a", fontSize: 11, textAlign: "center", margin: "10px 0 2px" }}>
-          ✅ Resultados oficiais atualizados automaticamente • horário de Brasília
-        </p>
-        {filtered.map(m => {
-          const finished = m.homeScore !== null;
-          const started = matchDateTime(m).getTime() <= now;
-          const locked = isLocked(m); // palpites encerrados (10min antes do jogo)
-          const isOpen = !!expanded[m.id];
-          const predCount = users.filter(u => hasPred(predictions[u.id]?.[m.id])).length;
-
-          let status;
-          if (finished) status = <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span>;
-          else if (started) status = <span style={{ color: "#ff7043", fontSize: 11, fontWeight: 700 }}>🔴 Em andamento</span>;
-          else if (locked) status = <span style={{ color: "#ef5350", fontSize: 11, fontWeight: 700 }}>🔒 Encerrado p/ palpite</span>;
-          else status = <span style={{ color: "#546e7a", fontSize: 11 }}>🕐 Em breve</span>;
-
-          return (
-            <div key={m.id} style={styles.matchCard}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
-                {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
-                {status}
-              </div>
-              <div style={styles.matchRow}>
-                <span style={styles.team}>{m.home}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {finished ? (
-                    <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
-                  ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
-                </div>
-                <span style={styles.team}>{m.away}</span>
-              </div>
-
-              {/* Palpites só ficam disponíveis depois que o jogo fecha (palpites encerrados) */}
-              {locked && users.length > 0 && (
-                <>
-                  <button onClick={() => toggle(m.id)} style={styles.expandBtn}>
-                    {isOpen ? "🙈 Ocultar palpites" : `👁 Ver palpites (${predCount})`}
-                    <span style={{ marginLeft: 6, transition: "transform 0.2s", display: "inline-block", transform: isOpen ? "rotate(180deg)" : "none" }}>▾</span>
-                  </button>
-                  {isOpen && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                      {[...users]
-                        .map(u => {
-                          const pred = predictions[u.id]?.[m.id];
-                          const noPred = !hasPred(pred);
-                          const pts = (!noPred && finished) ? calcPoints(pred, m, m.phase) : null;
-                          return { u, pred, noPred, pts };
-                        })
-                        .sort((a, b) => (b.pts ?? -1) - (a.pts ?? -1) || (a.noPred - b.noPred))
-                        .map(({ u, pred, noPred, pts }) => {
-                          const res = pts !== null ? getResultLabel(pts, m.phase) : null;
-                          return (
-                            <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                              <Avatar name={u.displayName} size={22} />
-                              <span style={{ marginLeft: 8, fontSize: 12, color: noPred ? "#546e7a" : "#90a4ae", flex: 1 }}>
-                                {u.displayName}{currentUser?.id === u.id && " (você)"}
-                              </span>
-                              {noPred
-                                ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
-                                : <>
-                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
-                                    {res && <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
-                                  </>
-                              }
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </>
-              )}
+        {filtered.map(m => (
+          <div key={m.id} style={styles.matchCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
+              {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
+              {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando...</span>}
             </div>
-          );
-        })}
+            <div style={styles.matchRow}>
+              <span style={styles.team}>{m.home}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                {m.homeScore !== null ? (
+                  <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
+                ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
+              </div>
+              <span style={styles.team}>{m.away}</span>
+            </div>
+            {m.homeScore !== null && users.length > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                {users.map(u => {
+                  const pred = predictions[u.id]?.[m.id];
+                  const noPred = !hasPred(pred);
+                  const pts = noPred ? 0 : calcPoints(pred, m, m.phase);
+                  const res = noPred ? null : getResultLabel(pts, m.phase);
+                  return (
+                    <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <Avatar name={u.displayName} size={22} />
+                      <span style={{ marginLeft: 8, fontSize: 12, color: "#90a4ae", flex: 1 }}>{u.displayName}</span>
+                      {noPred
+                        ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
+                        : <>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
+                            <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>
+                          </>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── BACKUP PANEL ─────────────────────────────────────────────────────────────
+function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, setPredictions, addToast }) {
+  const fileInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleExport = () => {
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      users: allUsers.filter(u => !u.isAdmin),
+      matches,
+      predictions,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    a.href = url;
+    a.download = `backup-bolao-copa-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast("💾 Backup exportado com sucesso!", "success");
+  };
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.users || !data.matches || !data.predictions) throw new Error("Formato inválido");
+        const merged = [ADMIN_USER, ...data.users.filter(u => !u.isAdmin)];
+        setUsers(merged);
+        setMatches(data.matches);
+        setPredictions(data.predictions);
+        addToast(`✅ Backup restaurado! (${data.users.length} jogadores, ${data.matches.length} jogos)`, "success");
+      } catch {
+        addToast("❌ Arquivo de backup inválido.", "warning");
+      }
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div style={styles.infoCard2}>
+      <strong style={{ color: "#e0e0e0", fontSize: 14 }}>💾 Backup dos Dados</strong>
+      <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
+        Exporte regularmente para evitar perda de dados. O plano gratuito do banco não tem backup automático.
+      </p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={handleExport} style={{ flex: 1, background: "linear-gradient(90deg,#00bcd4,#0097a7)", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}>
+          ⬇️ Exportar Backup
+        </button>
+        <button onClick={() => fileInputRef.current?.click()} disabled={importing} style={{ flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#e0e0e0", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}>
+          {importing ? "Importando..." : "⬆️ Importar Backup"}
+        </button>
+        <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
       </div>
     </div>
   );
@@ -1188,7 +1074,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers }) {
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, phases, activePhase, setActivePhase, currentUser, allNonAdminUsers, setUsers, addToast }) {
+function AdminScreen({ matches, setMatches, predictions, setPredictions, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
@@ -1234,7 +1120,7 @@ function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScre
               {aiMatches.map((m, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#90a4ae", background: "rgba(255,255,255,0.03)", borderRadius: 6, padding: "4px 8px" }}>
                   <span>{m.home} × {m.away}</span>
-                  <span>{fmtMatchDate(m)}</span>
+                  <span>{m.date} {m.time}</span>
                 </div>
               ))}
             </div>
@@ -1243,6 +1129,8 @@ function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScre
             </button>
           </div>
         )}
+
+        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} addToast={addToast} />
 
         <AdminUsersPanel allNonAdminUsers={allNonAdminUsers} setUsers={setUsers} />
 
@@ -1258,7 +1146,7 @@ function AdminScreen({ matches, setMatches, adminScores, setAdminScores, setScre
         {filtered.map(m => (
           <div key={m.id} style={styles.adminMatchCard}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {fmtMatchDate(m)}</span>
+              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
               {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ {m.homeScore}×{m.awayScore}</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando</span>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1339,5 +1227,4 @@ const styles = {
   rankSecond: { background: "rgba(207,216,220,0.06)", border: "1px solid rgba(207,216,220,0.2)" },
   rankThird: { background: "rgba(255,152,0,0.06)", border: "1px solid rgba(255,152,0,0.2)" },
   adminMatchCard: { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "12px", marginBottom: 10 },
-  expandBtn: { marginTop: 10, width: "100%", background: "rgba(0,188,212,0.08)", border: "1px solid rgba(0,188,212,0.25)", borderRadius: 10, color: "#4dd0e1", padding: "8px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
 };
