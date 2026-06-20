@@ -158,10 +158,29 @@ const FLAGS = {
   "Uzbekistan": "🇺🇿", "Colombia": "🇨🇴", "England": "🏴", "Croatia": "🇭🇷",
   "Ghana": "🇬🇭", "Panama": "🇵🇦",
 };
+
+// ─── COUNTRY NAME → PORTUGUÊS (BR) ─────────────────────────────────────────────
+const NAMES_PT = {
+  "Mexico": "México", "South Africa": "África do Sul", "South Korea": "Coreia do Sul",
+  "Czech Republic": "República Tcheca", "Canada": "Canadá", "Qatar": "Catar",
+  "Switzerland": "Suíça", "Brazil": "Brasil", "Morocco": "Marrocos", "Haiti": "Haiti",
+  "Scotland": "Escócia", "USA": "Estados Unidos", "Paraguay": "Paraguai",
+  "Australia": "Austrália", "Germany": "Alemanha", "Curaçao": "Curaçao",
+  "Ivory Coast": "Costa do Marfim", "Ecuador": "Equador", "Netherlands": "Holanda",
+  "Japan": "Japão", "Tunisia": "Tunísia", "Belgium": "Bélgica", "Egypt": "Egito",
+  "Iran": "Irã", "New Zealand": "Nova Zelândia", "Spain": "Espanha",
+  "Cape Verde": "Cabo Verde", "Saudi Arabia": "Arábia Saudita", "Uruguay": "Uruguai",
+  "France": "França", "Senegal": "Senegal", "Norway": "Noruega", "Argentina": "Argentina",
+  "Algeria": "Argélia", "Austria": "Áustria", "Jordan": "Jordânia", "Portugal": "Portugal",
+  "Uzbekistan": "Uzbequistão", "Colombia": "Colômbia", "England": "Inglaterra",
+  "Croatia": "Croácia", "Ghana": "Gana", "Panama": "Panamá",
+};
+
 function flagify(team) {
   if (!team) return team;
   const flag = FLAGS[team];
-  return flag ? `${flag} ${team}` : `🏆 ${team}`;
+  const name = NAMES_PT[team] || team;
+  return flag ? `${flag} ${name}` : `🏆 ${name}`;
 }
 
 // ─── ROUND → PHASE MAP ─────────────────────────────────────────────────────────
@@ -216,6 +235,25 @@ function toUtcDateTime(dateStr, timeStr) {
   return { date, time };
 }
 
+// ─── CHECK FOR NEW RESULTS ──────────────────────────────────────────────────────
+// Compares the public source against our current matches and returns only the
+// ones where a final score is now available but wasn't recorded locally yet.
+// Never overwrites a match the admin already entered a score for manually.
+function findScoreUpdates(currentMatches, fetchedMatches) {
+  const updates = [];
+  for (const fetched of fetchedMatches) {
+    if (fetched.homeScore === null) continue; // source has no result yet
+    const local = currentMatches.find(m => m.id === fetched.id);
+    if (!local) continue; // unknown match, ignore (shouldn't normally happen)
+    const alreadyHasScore = local.homeScore !== null;
+    const sameAsFetched = local.homeScore === fetched.homeScore && local.awayScore === fetched.awayScore;
+    if (!alreadyHasScore || !sameAsFetched) {
+      updates.push({ match: local, newHomeScore: fetched.homeScore, newAwayScore: fetched.awayScore });
+    }
+  }
+  return updates;
+}
+
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
 const Avatar = ({ name, size = 36 }) => {
   const initials = name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
@@ -249,7 +287,14 @@ export default function BolaoApp() {
 
   // Auth state
   const [users, setUsers] = useState(DEFAULT_USERS);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUserRaw] = useState(null);
+  const setCurrentUser = (user) => {
+    setCurrentUserRaw(user);
+    try {
+      if (user) localStorage.setItem("bolao:session", String(user.id));
+      else localStorage.removeItem("bolao:session");
+    } catch {}
+  };
   const [screen, setScreen] = useState("landing");
 
   // Game state
@@ -269,6 +314,7 @@ export default function BolaoApp() {
   // ── LOAD FROM STORAGE ──
   useEffect(() => {
     async function load() {
+      let loadedUsers = null;
       try {
         const [u, m, p] = await Promise.all([
           storage.get("bolao:users"),
@@ -279,6 +325,7 @@ export default function BolaoApp() {
           const loaded = JSON.parse(u.value);
           // Always ensure admin user is present with current credentials
           const withAdmin = [ADMIN_USER, ...loaded.filter(x => !x.isAdmin)];
+          loadedUsers = withAdmin;
           setUsers(withAdmin);
         }
         if (m) setMatches(JSON.parse(m.value));
@@ -286,6 +333,23 @@ export default function BolaoApp() {
       } catch {
         // First run or storage empty — use defaults
       }
+
+      // ── RESTORE SESSION ── if there's a saved session, log the user back in
+      // automatically so refreshing the page doesn't require logging in again.
+      try {
+        const savedId = localStorage.getItem("bolao:session");
+        if (savedId != null) {
+          const pool = loadedUsers || DEFAULT_USERS;
+          const found = pool.find(u => String(u.id) === savedId);
+          if (found && !found.inactive) {
+            setCurrentUserRaw(found);
+            setScreen("home");
+          } else {
+            localStorage.removeItem("bolao:session");
+          }
+        }
+      } catch {}
+
       setStorageReady(true);
     }
     load();
@@ -409,6 +473,29 @@ export default function BolaoApp() {
     setLoadingAI(false);
   };
 
+  const [scoreUpdates, setScoreUpdates] = useState(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkError, setCheckError] = useState(null);
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true); setCheckError(null); setScoreUpdates(null);
+    try {
+      const fetched = await fetchMatchesFromAI();
+      const updates = findScoreUpdates(matches, fetched);
+      setScoreUpdates(updates);
+      if (updates.length === 0) addToast("✅ Nenhum resultado novo encontrado.", "success");
+    } catch { setCheckError("Não foi possível verificar agora. Tente novamente em alguns minutos."); }
+    setCheckingUpdates(false);
+  };
+  const applyScoreUpdates = () => {
+    if (!scoreUpdates || scoreUpdates.length === 0) return;
+    setMatches(prev => prev.map(m => {
+      const upd = scoreUpdates.find(u => u.match.id === m.id);
+      return upd ? { ...m, homeScore: upd.newHomeScore, awayScore: upd.newAwayScore } : m;
+    }));
+    addToast(`✅ ${scoreUpdates.length} resultado(s) atualizado(s)!`, "success");
+    setScoreUpdates(null);
+  };
+
   const logout = () => { setCurrentUser(null); setScreen("landing"); };
 
   // ── LOADING SCREEN ──
@@ -422,7 +509,7 @@ export default function BolaoApp() {
   // ── ROUTER ──
   const regularUsers = users.filter(u => !u.isAdmin && !u.inactive);
   const allNonAdminUsers = users.filter(u => !u.isAdmin);
-  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
+  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
 
   return (
     <div style={styles.root}>
@@ -616,13 +703,15 @@ function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen }) {
 
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActivePhase }) {
-  const nextMatch = [...matches].filter(m => minutesUntilMatch(m) > 0).sort((a, b) => matchDateTime(a) - matchDateTime(b))[0];
+  const upcoming = [...matches].filter(m => minutesUntilMatch(m) > 0).sort((a, b) => matchDateTime(a) - matchDateTime(b));
+  const nextMatch = upcoming[0];
+  // If other matches kick off at the exact same time as the next one, show them all together.
+  const nextMatches = nextMatch ? upcoming.filter(m => matchDateTime(m).getTime() === matchDateTime(nextMatch).getTime()) : [];
   const myRank = ranking.findIndex(r => r.id === currentUser.id) + 1;
   const myData = ranking.find(r => r.id === currentUser.id);
 
-  const goToNextMatch = () => {
-    if (!nextMatch) return;
-    setActivePhase(nextMatch.phase);
+  const goToMatch = (m) => {
+    setActivePhase(m.phase);
     setScreen("predictions");
   };
 
@@ -643,19 +732,27 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
             <div style={styles.statBox}><span style={styles.statNum}>{myData.exact}</span><span style={styles.statLabel}>cravados</span></div>
           </div>
         )}
-        {nextMatch && (
-          <div
-            onClick={!isLocked(nextMatch) ? goToNextMatch : undefined}
-            style={{ ...styles.nextMatchBadge, ...(isLocked(nextMatch) ? {} : { cursor: "pointer", borderColor: "rgba(255,214,0,0.4)", boxShadow: "0 0 0 1px rgba(255,214,0,0.15)" }) }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: "#ffd600", fontWeight: 700 }}>⏰ PRÓXIMO JOGO</span>
-              {!isLocked(nextMatch) && <span style={{ fontSize: 10, color: "#ffd600", fontWeight: 700, background: "rgba(255,214,0,0.15)", padding: "2px 8px", borderRadius: 10 }}>Apostar →</span>}
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", margin: "6px 0 3px", display: "block" }}>{nextMatch.home} × {nextMatch.away}</span>
-            <span style={{ fontSize: 11, color: minutesUntilMatch(nextMatch) <= 30 ? "#ff7043" : "#90a4ae" }}>
-              {isLocked(nextMatch) ? "🔒 Palpites encerrados" : `🕐 Fecha em ${formatCountdown(minutesUntilMatch(nextMatch) - LOCK_MINUTES_BEFORE)}`}
+        {nextMatches.length > 0 && (
+          <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "#ffd600", fontWeight: 700, textAlign: "left" }}>
+              ⏰ {nextMatches.length > 1 ? "PRÓXIMOS JOGOS" : "PRÓXIMO JOGO"}
             </span>
+            {nextMatches.map(m => (
+              <div
+                key={m.id}
+                onClick={!isLocked(m) ? () => goToMatch(m) : undefined}
+                style={{ ...styles.nextMatchBadge, marginTop: 0, ...(isLocked(m) ? {} : { cursor: "pointer", borderColor: "rgba(255,214,0,0.4)", boxShadow: "0 0 0 1px rgba(255,214,0,0.15)" }) }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 10, color: "#78909c" }}>{m.phase}{m.group ? ` • Grupo ${m.group}` : ""}</span>
+                  {!isLocked(m) && <span style={{ fontSize: 10, color: "#ffd600", fontWeight: 700, background: "rgba(255,214,0,0.15)", padding: "2px 8px", borderRadius: 10 }}>Apostar →</span>}
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", margin: "6px 0 3px", display: "block" }}>{m.home} × {m.away}</span>
+                <span style={{ fontSize: 11, color: minutesUntilMatch(m) <= 30 ? "#ff7043" : "#90a4ae" }}>
+                  {isLocked(m) ? "🔒 Palpites encerrados" : `🕐 Fecha em ${formatCountdown(minutesUntilMatch(m) - LOCK_MINUTES_BEFORE)}`}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -890,7 +987,23 @@ function RankingScreen({ ranking, currentUser, setScreen }) {
 
 // ─── RESULTS ──────────────────────────────────────────────────────────────────
 function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase }) {
-  const filtered = matches.filter(m => m.phase === activePhase);
+  const [expanded, setExpanded] = useState({});
+  const toggleExpand = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
+
+  // Order: the most recently closed/finished match comes first, then the
+  // remaining matches in chronological order (soonest upcoming next, and so on).
+  // A finished match stays "first" until the next match's start time arrives.
+  const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
+    const aTime = matchDateTime(a).getTime();
+    const bTime = matchDateTime(b).getTime();
+    const nowTs = Date.now();
+    const aPast = aTime <= nowTs;
+    const bPast = bTime <= nowTs;
+    if (aPast && bPast) return bTime - aTime;   // both already started: most recent first
+    if (!aPast && !bPast) return aTime - bTime; // both upcoming: soonest first
+    return aPast ? -1 : 1;                       // past matches before upcoming ones
+  });
+
   return (
     <div style={styles.page}>
       <TopBar title="📊 Resultados" onBack={() => setScreen(currentUser ? "home" : "landing")} />
@@ -902,48 +1015,110 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
         ))}
       </div>
       <div style={{ padding: "0 16px 32px" }}>
-        {filtered.map(m => (
-          <div key={m.id} style={styles.matchCard}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
-              {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
-              {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando...</span>}
-            </div>
-            <div style={styles.matchRow}>
-              <span style={styles.team}>{m.home}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                {m.homeScore !== null ? (
-                  <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
-                ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
+        {filtered.map(m => {
+          const locked = isLocked(m);
+          const isOpen = !!expanded[m.id];
+          return (
+            <div key={m.id} style={styles.matchCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
+                {m.group && <span style={styles.groupBadge}>Grupo {m.group}</span>}
+                {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ Finalizado</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando...</span>}
               </div>
-              <span style={styles.team}>{m.away}</span>
-            </div>
-            {m.homeScore !== null && users.length > 0 && (
-              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                {users.map(u => {
-                  const pred = predictions[u.id]?.[m.id];
-                  const noPred = !hasPred(pred);
-                  const pts = noPred ? 0 : calcPoints(pred, m, m.phase);
-                  const res = noPred ? null : getResultLabel(pts, m.phase);
-                  return (
-                    <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                      <Avatar name={u.displayName} size={22} />
-                      <span style={{ marginLeft: 8, fontSize: 12, color: "#90a4ae", flex: 1 }}>{u.displayName}</span>
-                      {noPred
-                        ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
-                        : <>
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
-                            <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>
-                          </>
-                      }
+              <div style={styles.matchRow}>
+                <span style={styles.team}>{m.home}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {m.homeScore !== null ? (
+                    <><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.homeScore}</span><span style={{ color: "#546e7a" }}>×</span><span style={{ ...styles.scoreBox, background: "#1e3a5f" }}>{m.awayScore}</span></>
+                  ) : <span style={{ color: "#546e7a", fontSize: 12 }}>– × –</span>}
+                </div>
+                <span style={styles.team}>{m.away}</span>
+              </div>
+
+              {/* Predictions are only ever shown for matches whose betting window
+                  has already closed — never reveal picks for open matches. */}
+              {locked && users.length > 0 && (
+                <>
+                  <button
+                    onClick={() => toggleExpand(m.id)}
+                    style={{ marginTop: 10, width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#90a4ae", fontSize: 12, fontWeight: 600, padding: "7px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    {isOpen ? "▲ Ocultar palpites" : "▼ Ver palpites dos participantes"}
+                  </button>
+
+                  {isOpen && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                      {users.map(u => {
+                        const pred = predictions[u.id]?.[m.id];
+                        const noPred = !hasPred(pred);
+                        const pts = (noPred || m.homeScore === null) ? 0 : calcPoints(pred, m, m.phase);
+                        const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase);
+                        return (
+                          <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                            <Avatar name={u.displayName} size={22} />
+                            <span style={{ marginLeft: 8, fontSize: 12, color: "#90a4ae", flex: 1 }}>{u.displayName}</span>
+                            {noPred
+                              ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
+                              : <>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
+                                  {res && <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
+                                </>
+                            }
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
+    </div>
+  );
+}
+
+// ─── SCORE UPDATES PANEL ───────────────────────────────────────────────────────
+// Lets the admin check the public fixtures source for newly finished matches
+// and apply only the score changes, without touching anything entered manually.
+function ScoreUpdatesPanel({ checkingUpdates, checkError, scoreUpdates, handleCheckUpdates, applyScoreUpdates }) {
+  return (
+    <div style={styles.infoCard2}>
+      <strong style={{ color: "#e0e0e0", fontSize: 14 }}>🔄 Verificar Resultados</strong>
+      <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
+        Busca jogos já finalizados na fonte pública e mostra o que mudou, sem sobrescrever resultados que você já inseriu.
+      </p>
+      <button
+        onClick={handleCheckUpdates}
+        disabled={checkingUpdates}
+        style={{ width: "100%", background: checkingUpdates ? "#37474f" : "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#e0e0e0", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}
+      >
+        {checkingUpdates ? "🔍 Verificando..." : "🔄 Verificar Atualizações"}
+      </button>
+      {checkError && <p style={{ color: "#ef5350", fontSize: 12, textAlign: "center", marginTop: 8 }}>{checkError}</p>}
+
+      {scoreUpdates && scoreUpdates.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ color: "#4caf50", fontWeight: 700, fontSize: 13 }}>✅ {scoreUpdates.length} resultado(s) novo(s)</span>
+            <button
+              onClick={applyScoreUpdates}
+              style={{ background: "linear-gradient(90deg,#00bcd4,#0097a7)", border: "none", borderRadius: 8, color: "#fff", fontWeight: 800, fontSize: 12, padding: "6px 12px", cursor: "pointer" }}
+            >
+              💾 Aplicar Todos
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {scoreUpdates.map((u) => (
+              <div key={u.match.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#cfd8dc", background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: "8px 10px" }}>
+                <span>{u.match.home} × {u.match.away}</span>
+                <strong style={{ color: "#4caf50" }}>{u.newHomeScore} × {u.newAwayScore}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1068,7 +1243,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers }) {
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ matches, setMatches, predictions, setPredictions, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
+function AdminScreen({ matches, setMatches, predictions, setPredictions, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
@@ -1123,6 +1298,14 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, adminSc
             </button>
           </div>
         )}
+
+        <ScoreUpdatesPanel
+          checkingUpdates={checkingUpdates}
+          checkError={checkError}
+          scoreUpdates={scoreUpdates}
+          handleCheckUpdates={handleCheckUpdates}
+          applyScoreUpdates={applyScoreUpdates}
+        />
 
         <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} addToast={addToast} />
 
