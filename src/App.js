@@ -69,16 +69,16 @@ const NOTIFY_MINUTES_BEFORE = 30;
 
 const INITIAL_MATCHES = [
   // ── Fase de Grupos (horários em UTC; convertidos automaticamente para o fuso de cada usuário) ──
-  { id: 1,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "18:00", home: "🇺🇸 EUA",       away: "🇲🇽 México",      homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
-  { id: 2,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "21:00", home: "🇨🇦 Canadá",   away: "🇨🇴 Colômbia",    homeScore: null, awayScore: null, stadium: "BMO Field" },
-  { id: 3,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "18:00", home: "🇧🇷 Brasil",   away: "🇩🇪 Alemanha",    homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
-  { id: 4,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "21:00", home: "🇦🇷 Argentina",away: "🇫🇷 França",      homeScore: null, awayScore: null, stadium: "Rose Bowl" },
-  { id: 5,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "18:00", home: "🇪🇸 Espanha",  away: "🏴 Inglaterra",   homeScore: null, awayScore: null, stadium: "AT&T Stadium" },
-  { id: 6,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "21:00", home: "🇵🇹 Portugal", away: "🇳🇱 Holanda",    homeScore: null, awayScore: null, stadium: "Levi's Stadium" },
-  { id: 7,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "18:00", home: "🇯🇵 Japão",    away: "🇸🇦 Arábia",     homeScore: null, awayScore: null, stadium: "Mercedes-Benz Stadium" },
-  { id: 8,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "21:00", home: "🇲🇦 Marrocos", away: "🇸🇳 Senegal",    homeScore: null, awayScore: null, stadium: "Estadio Azteca" },
-  { id: 9,  phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "18:00", home: "🇧🇷 Brasil",   away: "🇨🇴 Colômbia",   homeScore: null, awayScore: null, stadium: "Hard Rock Stadium" },
-  { id: 10, phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "21:00", home: "🇩🇪 Alemanha", away: "🇨🇦 Canadá",     homeScore: null, awayScore: null, stadium: "Gillette Stadium" },
+  { id: 1,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "15:00", home: "🇺🇸 EUA",       away: "🇲🇽 México",      homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
+  { id: 2,  phase: "Fase de Grupos", group: "A", date: "2026-06-11", time: "18:00", home: "🇨🇦 Canadá",   away: "🇨🇴 Colômbia",    homeScore: null, awayScore: null, stadium: "BMO Field" },
+  { id: 3,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "15:00", home: "🇧🇷 Brasil",   away: "🇩🇪 Alemanha",    homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
+  { id: 4,  phase: "Fase de Grupos", group: "B", date: "2026-06-12", time: "18:00", home: "🇦🇷 Argentina",away: "🇫🇷 França",      homeScore: null, awayScore: null, stadium: "Rose Bowl" },
+  { id: 5,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "15:00", home: "🇪🇸 Espanha",  away: "🏴 Inglaterra",   homeScore: null, awayScore: null, stadium: "AT&T Stadium" },
+  { id: 6,  phase: "Fase de Grupos", group: "C", date: "2026-06-13", time: "18:00", home: "🇵🇹 Portugal", away: "🇳🇱 Holanda",    homeScore: null, awayScore: null, stadium: "Levi's Stadium" },
+  { id: 7,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "15:00", home: "🇯🇵 Japão",    away: "🇸🇦 Arábia",     homeScore: null, awayScore: null, stadium: "Mercedes-Benz Stadium" },
+  { id: 8,  phase: "Fase de Grupos", group: "D", date: "2026-06-14", time: "18:00", home: "🇲🇦 Marrocos", away: "🇸🇳 Senegal",    homeScore: null, awayScore: null, stadium: "Estadio Azteca" },
+  { id: 9,  phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "15:00", home: "🇧🇷 Brasil",   away: "🇨🇴 Colômbia",   homeScore: null, awayScore: null, stadium: "Hard Rock Stadium" },
+  { id: 10, phase: "Fase de Grupos", group: "E", date: "2026-06-15", time: "18:00", home: "🇩🇪 Alemanha", away: "🇨🇦 Canadá",     homeScore: null, awayScore: null, stadium: "Gillette Stadium" },
   // ── Segunda Fase ──
   { id: 51, phase: "Segunda Fase", group: null, date: "2026-06-27", time: "15:00", home: "🏆 1º Grupo A", away: "🥈 2º Grupo C", homeScore: null, awayScore: null, stadium: "MetLife Stadium" },
   { id: 52, phase: "Segunda Fase", group: null, date: "2026-06-27", time: "19:00", home: "🏆 1º Grupo B", away: "🥈 2º Grupo D", homeScore: null, awayScore: null, stadium: "SoFi Stadium" },
@@ -105,7 +105,8 @@ const INITIAL_MATCHES = [
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 function matchDateTime(m) {
-  return new Date(`${m.date}T${m.time}:00Z`);
+  // Datas/horários já são convertidos e armazenados no horário de Brasília (UTC-3).
+  return new Date(`${m.date}T${m.time}:00-03:00`);
 }
 function minutesUntilMatch(m) {
   return (matchDateTime(m) - Date.now()) / 60000;
@@ -159,21 +160,28 @@ const FLAGS = {
   "Ghana": "🇬🇭", "Panama": "🇵🇦",
 };
 
-// ─── COUNTRY NAME → PORTUGUÊS (BR) ─────────────────────────────────────────────
+// ─── NOMES DOS PAÍSES EM PORTUGUÊS (BR) ───────────────────────────────────────
 const NAMES_PT = {
   "Mexico": "México", "South Africa": "África do Sul", "South Korea": "Coreia do Sul",
-  "Czech Republic": "República Tcheca", "Canada": "Canadá", "Qatar": "Catar",
-  "Switzerland": "Suíça", "Brazil": "Brasil", "Morocco": "Marrocos", "Haiti": "Haiti",
-  "Scotland": "Escócia", "USA": "Estados Unidos", "Paraguay": "Paraguai",
-  "Australia": "Austrália", "Germany": "Alemanha", "Curaçao": "Curaçao",
-  "Ivory Coast": "Costa do Marfim", "Ecuador": "Equador", "Netherlands": "Holanda",
+  "Korea Republic": "Coreia do Sul", "Czech Republic": "República Tcheca",
+  "Canada": "Canadá", "Qatar": "Catar", "Switzerland": "Suíça", "Brazil": "Brasil",
+  "Morocco": "Marrocos", "Haiti": "Haiti", "Scotland": "Escócia", "USA": "Estados Unidos",
+  "United States": "Estados Unidos", "Paraguay": "Paraguai", "Australia": "Austrália",
+  "Germany": "Alemanha", "Curaçao": "Curaçao", "Ivory Coast": "Costa do Marfim",
+  "Côte d'Ivoire": "Costa do Marfim", "Ecuador": "Equador", "Netherlands": "Holanda",
   "Japan": "Japão", "Tunisia": "Tunísia", "Belgium": "Bélgica", "Egypt": "Egito",
-  "Iran": "Irã", "New Zealand": "Nova Zelândia", "Spain": "Espanha",
+  "Iran": "Irã", "IR Iran": "Irã", "New Zealand": "Nova Zelândia", "Spain": "Espanha",
   "Cape Verde": "Cabo Verde", "Saudi Arabia": "Arábia Saudita", "Uruguay": "Uruguai",
   "France": "França", "Senegal": "Senegal", "Norway": "Noruega", "Argentina": "Argentina",
   "Algeria": "Argélia", "Austria": "Áustria", "Jordan": "Jordânia", "Portugal": "Portugal",
   "Uzbekistan": "Uzbequistão", "Colombia": "Colômbia", "England": "Inglaterra",
   "Croatia": "Croácia", "Ghana": "Gana", "Panama": "Panamá",
+  // extras comuns
+  "Italy": "Itália", "Poland": "Polônia", "Denmark": "Dinamarca", "Sweden": "Suécia",
+  "Turkey": "Turquia", "Türkiye": "Turquia", "Greece": "Grécia", "Serbia": "Sérvia",
+  "Nigeria": "Nigéria", "Cameroon": "Camarões", "Peru": "Peru", "Chile": "Chile",
+  "Costa Rica": "Costa Rica", "Wales": "País de Gales", "Ukraine": "Ucrânia",
+  "Russia": "Rússia", "China": "China", "India": "Índia", "Israel": "Israel",
 };
 
 function flagify(team) {
@@ -195,14 +203,45 @@ function mapRoundToPhase(round) {
   return "Fase de Grupos";
 }
 
+// ─── CONVERSÃO DE FUSO → HORÁRIO DE BRASÍLIA ──────────────────────────────────
+// A fonte oficial traz o horário com o fuso embutido e que MUDA por cidade-sede
+// (ex.: "20:30 UTC-4", "13:00 UTC-6"). Aqui convertemos para o horário de
+// Brasília (UTC-3, fixo). Ex.: Brasil x Haiti "20:30 UTC-4" → 21:30 (Brasília).
+function sourceToBrasilia(dateStr, timeStr) {
+  const fallback = { date: dateStr, time: (String(timeStr || "").split(" ")[0] || "00:00") };
+  const mt = String(timeStr || "").trim().match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})(?::?(\d{2}))?$/i);
+  let absMs;
+  if (mt) {
+    const hh = mt[1].padStart(2, "0"), mm = mt[2];
+    const offH = parseInt(mt[3], 10);
+    const sign = offH < 0 ? "-" : "+";
+    const offHH = String(Math.abs(offH)).padStart(2, "0");
+    const offMM = mt[4] || "00";
+    absMs = new Date(`${dateStr}T${hh}:${mm}:00${sign}${offHH}:${offMM}`).getTime();
+  } else {
+    // Sem fuso informado: assume que já está em horário de Brasília.
+    absMs = new Date(`${dateStr}T${fallback.time}:00-03:00`).getTime();
+  }
+  if (isNaN(absMs)) return fallback;
+  // Desloca -3h para que os campos UTC representem o relógio de Brasília.
+  const b = new Date(absMs - 3 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return {
+    date: `${b.getUTCFullYear()}-${p(b.getUTCMonth() + 1)}-${p(b.getUTCDate())}`,
+    time: `${p(b.getUTCHours())}:${p(b.getUTCMinutes())}`,
+  };
+}
+
 // ─── FETCH REAL WORLD CUP 2026 FIXTURES (free, no API key) ─────────────────────
 // Source: openfootball/worldcup.json — public domain (CC0), updated daily.
+// Os horários são convertidos para Brasília e os placares lidos de score.ft.
 async function fetchMatchesFromAI() {
   const res = await fetch("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json");
   if (!res.ok) throw new Error("Falha ao buscar dados");
   const data = await res.json();
   return data.matches.map((m, i) => {
-    const { date, time } = toUtcDateTime(m.date, m.time);
+    const { date, time } = sourceToBrasilia(m.date, m.time);
+    const ft = m.score && m.score.ft;
     return {
       id: m.num ? 1000 + Number(m.num) : i + 1,
       phase: mapRoundToPhase(m.round),
@@ -211,28 +250,28 @@ async function fetchMatchesFromAI() {
       time,
       home: flagify(m.team1),
       away: flagify(m.team2),
-      homeScore: typeof m.score1 === "number" ? m.score1 : null,
-      awayScore: typeof m.score2 === "number" ? m.score2 : null,
+      homeScore: Array.isArray(ft) && typeof ft[0] === "number" ? ft[0] : null,
+      awayScore: Array.isArray(ft) && typeof ft[1] === "number" ? ft[1] : null,
       stadium: m.ground || "",
     };
   });
 }
 
-// Converts a "HH:MM UTC±N" source time into UTC date/time strings.
-// Our app always stores date/time in UTC and lets the browser render it
-// in the viewer's local timezone (so Brazilian users see the correct local hour).
-function toUtcDateTime(dateStr, timeStr) {
-  if (!timeStr) return { date: dateStr, time: "00:00" };
-  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*UTC([+-]\d+)?/);
-  if (!match) return { date: dateStr, time: (timeStr.split(" ")[0] || "00:00") };
-  const [, hh, mm, offsetStr] = match;
-  const offset = offsetStr ? parseInt(offsetStr, 10) : 0;
-  // Local time at the venue = UTC + offset  →  UTC = local time - offset
-  const local = new Date(`${dateStr}T${hh.padStart(2, "0")}:${mm}:00Z`);
-  local.setUTCHours(local.getUTCHours() - offset);
-  const date = local.toISOString().slice(0, 10);
-  const time = local.toISOString().slice(11, 16);
-  return { date, time };
+// ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
+// Usa a tabela oficial como base (horários corretos em Brasília + placares reais
+// dos jogos encerrados) e, se a fonte ainda não tiver o placar de um jogo, mantém
+// o placar que o admin tenha lançado manualmente. Casa as partidas pelo id.
+function mergeOfficial(localMatches, official) {
+  const localById = new Map((localMatches || []).map(m => [m.id, m]));
+  return official.map(o => {
+    const prev = localById.get(o.id);
+    let homeScore = o.homeScore, awayScore = o.awayScore;
+    if ((homeScore === null || awayScore === null) && prev && prev.homeScore !== null && prev.awayScore !== null) {
+      homeScore = prev.homeScore;
+      awayScore = prev.awayScore;
+    }
+    return { ...o, homeScore, awayScore };
+  });
 }
 
 // ─── CHECK FOR NEW RESULTS ──────────────────────────────────────────────────────
@@ -399,6 +438,37 @@ export default function BolaoApp() {
     };
     const t = setInterval(sync, 20000);
     return () => clearInterval(t);
+  }, [storageReady]);
+
+  // ── RESULTADOS REAIS + HORÁRIOS: adota a tabela oficial automaticamente ──
+  // Busca a tabela oficial (horários já em Brasília e placares dos jogos
+  // encerrados) e grava no Supabase para todos verem, sem o admin precisar fazer
+  // nada. Preserva placares manuais quando a fonte ainda não tem o resultado.
+  useEffect(() => {
+    if (!storageReady) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const official = await fetchMatchesFromAI();
+        if (cancelled || !official.length) return;
+        let baseStr = null;
+        let base = matches;
+        try {
+          const remote = await storage.get("bolao:matches");
+          if (remote) { base = JSON.parse(remote.value); baseStr = remote.value; }
+        } catch {}
+        const merged = mergeOfficial(base, official);
+        const mergedStr = JSON.stringify(merged);
+        if (mergedStr !== (baseStr ?? JSON.stringify(base))) {
+          setMatches(merged);
+          storage.set("bolao:matches", mergedStr).catch(() => {});
+        }
+      } catch {}
+    };
+    run();
+    const t = setInterval(run, 120000); // a cada 2 minutos
+    return () => { cancelled = true; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
   // Notification checker
