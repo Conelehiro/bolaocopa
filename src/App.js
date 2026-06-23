@@ -326,6 +326,20 @@ const Toast = ({ toasts, removeToast }) => (
   </div>
 );
 
+// ─── RESPONSIVE: detecta layout desktop (telas largas) ────────────────────────
+const DESKTOP_BREAKPOINT = 900;
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== "undefined" ? window.innerWidth >= DESKTOP_BREAKPOINT : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth >= DESKTOP_BREAKPOINT);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isDesktop;
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const ADMIN_USER = { id: 0, username: "admin", displayName: "Admin", passwordHash: hashPassword("formula1+"), isAdmin: true };
 const DEFAULT_USERS = [ADMIN_USER];
@@ -358,6 +372,7 @@ export default function BolaoApp() {
   const [now, setNow] = useState(Date.now());
   const [toasts, setToasts] = useState([]);
   const notifiedRef = useRef(new Set());
+  const isDesktop = useIsDesktop();
 
   // ── LOAD FROM STORAGE ──
   useEffect(() => {
@@ -595,6 +610,25 @@ export default function BolaoApp() {
   const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin", "edit-profile"];
   const effectiveScreen = (currentUser?.mustResetPassword && protectedScreens.includes(screen)) ? "reset-password" : screen;
 
+  const isAuthScreen = ["landing", "login", "register", "reset-password"].includes(effectiveScreen);
+  const showSidebar = isDesktop && currentUser && !isAuthScreen;
+
+  const screenContent = (
+    <>
+      {effectiveScreen === "landing"     && <LandingScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "login"       && <LoginScreen {...props} allUsers={users} isDesktop={isDesktop} />}
+      {effectiveScreen === "register"    && <RegisterScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "reset-password" && <ResetPasswordScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "home"        && <HomeScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "edit-profile" && <EditProfileScreen {...props} addToast={addToast} isDesktop={isDesktop} />}
+      {effectiveScreen === "predictions" && <PredictionsScreen {...props} users={users} isDesktop={isDesktop} />}
+      {effectiveScreen === "ranking"     && <RankingScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "groups"      && <GroupsScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "results"     && <ResultsScreen {...props} isDesktop={isDesktop} />}
+      {effectiveScreen === "admin"       && <AdminScreen {...props} addToast={addToast} isDesktop={isDesktop} />}
+    </>
+  );
+
   return (
     <div style={styles.root}>
       <style>{`
@@ -604,46 +638,119 @@ export default function BolaoApp() {
         input[type=number] { -moz-appearance:textfield }
         ::-webkit-scrollbar { width:4px; height:4px }
         ::-webkit-scrollbar-thumb { background:#37474f; border-radius:4px }
+        .desktop-shell .app-page { min-height: 0; max-width: 720px; width: 100%; padding-bottom: 8px; }
+        .desktop-shell .app-page > div[style*="position: fixed"][style*="bottom: 0"] {
+          position: sticky; left: auto; transform: none; max-width: none; border-radius: 14px; margin-top: 16px;
+        }
+        .desktop-shell .app-page > div:first-child[style*="sticky"] { position: static; border-radius: 14px 14px 0 0; }
       `}</style>
       <Toast toasts={toasts} removeToast={removeToast} />
-      {effectiveScreen === "landing"     && <LandingScreen {...props} />}
-      {effectiveScreen === "login"       && <LoginScreen {...props} allUsers={users} />}
-      {effectiveScreen === "register"    && <RegisterScreen {...props} />}
-      {effectiveScreen === "reset-password" && <ResetPasswordScreen {...props} />}
-      {effectiveScreen === "home"        && <HomeScreen {...props} />}
-      {effectiveScreen === "edit-profile" && <EditProfileScreen {...props} addToast={addToast} />}
-      {effectiveScreen === "predictions" && <PredictionsScreen {...props} users={users} />}
-      {effectiveScreen === "ranking"     && <RankingScreen {...props} />}
-      {effectiveScreen === "groups"      && <GroupsScreen {...props} />}
-      {effectiveScreen === "results"     && <ResultsScreen {...props} />}
-      {effectiveScreen === "admin"       && <AdminScreen {...props} addToast={addToast} />}
+      {showSidebar ? (
+        <div className="desktop-shell" style={styles.desktopShell}>
+          <DesktopSidebar currentUser={currentUser} screen={effectiveScreen} setScreen={setScreen} logout={logout} ranking={ranking} />
+          <div style={styles.desktopMain}>{screenContent}</div>
+        </div>
+      ) : screenContent}
     </div>
   );
 }
 
-// ─── LANDING ──────────────────────────────────────────────────────────────────
-function LandingScreen({ setScreen }) {
+// ─── DESKTOP SIDEBAR ────────────────────────────────────────────────────────────
+// Painel fixo lateral inspirado em central de transmissão esportiva: identidade
+// do bolão no topo, navegação no meio, placar do líder do ranking fixo no rodapé.
+function DesktopSidebar({ currentUser, screen, setScreen, logout, ranking }) {
+  const leader = ranking[0];
+  const myRank = ranking.findIndex(r => r.id === currentUser.id) + 1;
+
+  const navItems = [
+    { icon: "🏠", label: "Início", screen: "home" },
+    { icon: "⚽", label: "Meus Palpites", screen: "predictions" },
+    { icon: "🏅", label: "Classificação", screen: "ranking" },
+    { icon: "🏆", label: "Grupos & Chaveamento", screen: "groups" },
+    { icon: "📊", label: "Resultados", screen: "results" },
+    ...(currentUser.isAdmin ? [{ icon: "🔐", label: "Administrador", screen: "admin" }] : []),
+  ];
+
   return (
-    <div style={styles.page}>
-      <div style={styles.hero}>
-        <div style={styles.trophyGlow}>🏆</div>
-        <h1 style={styles.heroTitle}>BOLÃO<br /><span style={{ color: "#ffd600" }}>COPA 2026</span></h1>
-        <p style={styles.heroSub}>FIFA World Cup • USA • México • Canadá</p>
-        <div style={{ display: "flex", gap: 10, marginTop: 24, justifyContent: "center" }}>
-          <button onClick={() => setScreen("login")} style={{ ...styles.btn, background: "#ffd600", color: "#0a0e1a", flex: 1, maxWidth: 160 }}>Entrar</button>
-          <button onClick={() => setScreen("register")} style={{ ...styles.btn, background: "transparent", border: "2px solid #ffd600", color: "#ffd600", flex: 1, maxWidth: 160 }}>Cadastrar</button>
+    <aside style={styles.sidebar}>
+      <div>
+        <div style={styles.sidebarBrand}>
+          <span style={{ fontSize: 30 }}>🏆</span>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 16, color: "#fff", lineHeight: 1.1 }}>BOLÃO</div>
+            <div style={{ fontWeight: 900, fontSize: 16, color: "#ffd600", lineHeight: 1.1 }}>COPA 2026</div>
+          </div>
         </div>
-        <button onClick={() => setScreen("ranking")} style={{ background: "none", border: "none", color: "#546e7a", fontSize: 12, marginTop: 14, cursor: "pointer", textDecoration: "underline" }}>Ver classificação sem entrar</button>
-      </div>
-      <div style={{ padding: "0 20px 40px" }}>
-        <div style={styles.infoGrid}>
-          {[["🎯","Placar Cravado","10 pts × fase"],["✅","Resultado Certo","5 pts × fase"],["📐","Fase a Fase","Pontos dobram a cada rodada"],["🔒","Palpites Fecham","10min antes do jogo"]].map(([ic,t,d]) => (
-            <div key={t} style={styles.infoCard}>
-              <span style={{ fontSize: 24 }}>{ic}</span>
-              <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13, color: "#e0e0e0" }}>{t}</div>
-              <div style={{ fontSize: 11, color: "#78909c", marginTop: 2 }}>{d}</div>
-            </div>
+
+        <button onClick={() => setScreen("edit-profile")} style={styles.sidebarProfile}>
+          <Avatar name={currentUser.displayName} photoUrl={currentUser.photoUrl} size={42} />
+          <div style={{ textAlign: "left", flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUser.displayName}</div>
+            <div style={{ fontSize: 11, color: "#78909c" }}>✏️ Editar perfil</div>
+          </div>
+        </button>
+
+        <nav style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 3 }}>
+          {navItems.map(item => (
+            <button
+              key={item.screen}
+              onClick={() => setScreen(item.screen)}
+              style={{ ...styles.sidebarNavItem, ...(screen === item.screen ? styles.sidebarNavItemActive : {}) }}
+            >
+              <span style={{ fontSize: 17 }}>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
           ))}
+        </nav>
+      </div>
+
+      <div>
+        {leader && !leader.isAdmin && (
+          <div style={styles.sidebarLeaderCard}>
+            <div style={{ fontSize: 10, color: "#ffd600", fontWeight: 700, letterSpacing: 0.5 }}>🥇 LÍDER DO BOLÃO</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <Avatar name={leader.displayName} photoUrl={leader.photoUrl} size={30} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{leader.displayName}</div>
+                <div style={{ fontSize: 10, color: "#78909c" }}>{leader.total} pontos</div>
+              </div>
+            </div>
+            {myRank > 1 && <div style={{ fontSize: 10, color: "#546e7a", marginTop: 8 }}>Você está em {myRank}º lugar</div>}
+          </div>
+        )}
+        <button onClick={logout} style={styles.sidebarLogout}>
+          <span>🚪</span> Sair da conta
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+// ─── LANDING ──────────────────────────────────────────────────────────────────
+function LandingScreen({ setScreen, isDesktop }) {
+  return (
+    <div className="app-page" style={{ ...styles.page, ...(isDesktop ? { maxWidth: "none", display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" } : {}) }}>
+      <div style={isDesktop ? { maxWidth: 880, width: "100%", padding: "40px 24px", display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 48, alignItems: "center" } : {}}>
+        <div style={isDesktop ? { ...styles.hero, border: "1px solid rgba(255,214,0,0.15)", borderRadius: 24, borderBottom: "1px solid rgba(255,214,0,0.15)" } : styles.hero}>
+          <div style={styles.trophyGlow}>🏆</div>
+          <h1 style={{ ...styles.heroTitle, ...(isDesktop ? { fontSize: 42 } : {}) }}>BOLÃO<br /><span style={{ color: "#ffd600" }}>COPA 2026</span></h1>
+          <p style={styles.heroSub}>FIFA World Cup • USA • México • Canadá</p>
+          <div style={{ display: "flex", gap: 10, marginTop: 24, justifyContent: "center" }}>
+            <button onClick={() => setScreen("login")} style={{ ...styles.btn, background: "#ffd600", color: "#0a0e1a", flex: 1, maxWidth: 160 }}>Entrar</button>
+            <button onClick={() => setScreen("register")} style={{ ...styles.btn, background: "transparent", border: "2px solid #ffd600", color: "#ffd600", flex: 1, maxWidth: 160 }}>Cadastrar</button>
+          </div>
+          <button onClick={() => setScreen("ranking")} style={{ background: "none", border: "none", color: "#546e7a", fontSize: 12, marginTop: 14, cursor: "pointer", textDecoration: "underline" }}>Ver classificação sem entrar</button>
+        </div>
+        <div style={isDesktop ? { padding: 0 } : { padding: "0 20px 40px" }}>
+          <div style={{ ...styles.infoGrid, ...(isDesktop ? { gridTemplateColumns: "1fr 1fr", gap: 14 } : {}) }}>
+            {[["🎯","Placar Cravado","10 pts × fase"],["✅","Resultado Certo","5 pts × fase"],["📐","Fase a Fase","Pontos dobram a cada rodada"],["🔒","Palpites Fecham","10min antes do jogo"]].map(([ic,t,d]) => (
+              <div key={t} style={{ ...styles.infoCard, ...(isDesktop ? { padding: "20px 16px", textAlign: "left" } : {}) }}>
+                <span style={{ fontSize: 24 }}>{ic}</span>
+                <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13, color: "#e0e0e0" }}>{t}</div>
+                <div style={{ fontSize: 11, color: "#78909c", marginTop: 2 }}>{d}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -676,7 +783,7 @@ function PasswordInput({ value, onChange, onEnter, placeholder, hasError }) {
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
-function LoginScreen({ allUsers, setCurrentUser, setScreen }) {
+function LoginScreen({ allUsers, setCurrentUser, setScreen, isDesktop }) {
   const users = allUsers;
   const [u, setU] = useState(""); const [p, setP] = useState(""); const [err, setErr] = useState("");
   const handle = () => {
@@ -687,28 +794,30 @@ function LoginScreen({ allUsers, setCurrentUser, setScreen }) {
     setScreen(user.mustResetPassword ? "reset-password" : "home");
   };
   return (
-    <div style={styles.page}>
-      <TopBar title="Entrar" onBack={() => setScreen("landing")} />
-      <div style={styles.formBox}>
-        <div style={{ fontSize: 40, textAlign: "center", marginBottom: 8 }}>⚽</div>
-        <p style={{ color: "#90a4ae", textAlign: "center", marginBottom: 20, fontSize: 14 }}>Acesse sua conta do bolão</p>
-        <label style={styles.label}>Usuário</label>
-        <input value={u} onChange={e => setU(e.target.value)} style={styles.input} placeholder="seu_usuario" autoCapitalize="none" />
-        <label style={styles.label}>Senha</label>
-        <PasswordInput value={p} onChange={setP} onEnter={handle} placeholder="••••••" />
-        {err && <p style={styles.errMsg}>{err}</p>}
-        <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Entrar</button>
-        <p style={{ textAlign: "center", color: "#546e7a", fontSize: 13, marginTop: 16 }}>
-          Não tem conta?{" "}
-          <button onClick={() => setScreen("register")} style={styles.linkBtn}>Cadastrar-se</button>
-        </p>
+    <div className="app-page" style={isDesktop ? styles.authPageDesktop : styles.page}>
+      <div style={isDesktop ? styles.authCard : {}}>
+        <TopBar title="Entrar" onBack={() => setScreen("landing")} />
+        <div style={styles.formBox}>
+          <div style={{ fontSize: 40, textAlign: "center", marginBottom: 8 }}>⚽</div>
+          <p style={{ color: "#90a4ae", textAlign: "center", marginBottom: 20, fontSize: 14 }}>Acesse sua conta do bolão</p>
+          <label style={styles.label}>Usuário</label>
+          <input value={u} onChange={e => setU(e.target.value)} style={styles.input} placeholder="seu_usuario" autoCapitalize="none" />
+          <label style={styles.label}>Senha</label>
+          <PasswordInput value={p} onChange={setP} onEnter={handle} placeholder="••••••" />
+          {err && <p style={styles.errMsg}>{err}</p>}
+          <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Entrar</button>
+          <p style={{ textAlign: "center", color: "#546e7a", fontSize: 13, marginTop: 16 }}>
+            Não tem conta?{" "}
+            <button onClick={() => setScreen("register")} style={styles.linkBtn}>Cadastrar-se</button>
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
 // ─── REGISTER ─────────────────────────────────────────────────────────────────
-function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen }) {
+function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen, isDesktop }) {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -752,45 +861,47 @@ function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen }) {
   };
 
   return (
-    <div style={styles.page}>
-      <TopBar title="Criar Conta" onBack={() => setScreen("landing")} />
-      <div style={styles.formBox}>
-        <div style={{ fontSize: 36, textAlign: "center", marginBottom: 16 }}>👤</div>
+    <div className="app-page" style={isDesktop ? styles.authPageDesktop : styles.page}>
+      <div style={isDesktop ? styles.authCard : {}}>
+        <TopBar title="Criar Conta" onBack={() => setScreen("landing")} />
+        <div style={styles.formBox}>
+          <div style={{ fontSize: 36, textAlign: "center", marginBottom: 16 }}>👤</div>
 
-        <label style={styles.label}>Nome (aparece no ranking) *</label>
-        <input value={displayName} onChange={e => setDisplayName(e.target.value)} style={{ ...styles.input, ...(errors.displayName ? styles.inputErr : {}) }} placeholder="Ex: Carlos Silva" />
-        {errors.displayName && <p style={styles.errMsg}>{errors.displayName}</p>}
+          <label style={styles.label}>Nome (aparece no ranking) *</label>
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)} style={{ ...styles.input, ...(errors.displayName ? styles.inputErr : {}) }} placeholder="Ex: Carlos Silva" />
+          {errors.displayName && <p style={styles.errMsg}>{errors.displayName}</p>}
 
-        <label style={styles.label}>Usuário (para login) *</label>
-        <div style={{ position: "relative" }}>
-          <input value={username} onChange={e => checkUsername(e.target.value)} style={{ ...styles.input, ...(errors.username ? styles.inputErr : {}), paddingRight: 36 }} placeholder="Ex: carlos_silva" autoCapitalize="none" />
-          {usernameOk === true  && <span style={styles.usernameOk}>✓</span>}
-          {usernameOk === false && <span style={styles.usernameErr}>✗</span>}
+          <label style={styles.label}>Usuário (para login) *</label>
+          <div style={{ position: "relative" }}>
+            <input value={username} onChange={e => checkUsername(e.target.value)} style={{ ...styles.input, ...(errors.username ? styles.inputErr : {}), paddingRight: 36 }} placeholder="Ex: carlos_silva" autoCapitalize="none" />
+            {usernameOk === true  && <span style={styles.usernameOk}>✓</span>}
+            {usernameOk === false && <span style={styles.usernameErr}>✗</span>}
+          </div>
+          {errors.username && <p style={styles.errMsg}>{errors.username}</p>}
+          {usernameOk === false && <p style={styles.errMsg}>Usuário já cadastrado. Escolha outro.</p>}
+          {usernameOk === true  && <p style={{ color: "#4caf50", fontSize: 12, marginTop: -8, marginBottom: 10 }}>✓ Usuário disponível</p>}
+
+          <label style={styles.label}>Senha *</label>
+          <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 4 caracteres" hasError={!!errors.password} />
+          {errors.password && <p style={styles.errMsg}>{errors.password}</p>}
+
+          <label style={styles.label}>Confirmar senha *</label>
+          <PasswordInput value={confirm} onChange={setConfirm} onEnter={handle} placeholder="Repita a senha" hasError={!!errors.confirm} />
+          {errors.confirm && <p style={styles.errMsg}>{errors.confirm}</p>}
+
+          <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Criar Conta e Entrar</button>
+          <p style={{ textAlign: "center", color: "#546e7a", fontSize: 13, marginTop: 14 }}>
+            Já tem conta?{" "}
+            <button onClick={() => setScreen("login")} style={styles.linkBtn}>Entrar</button>
+          </p>
         </div>
-        {errors.username && <p style={styles.errMsg}>{errors.username}</p>}
-        {usernameOk === false && <p style={styles.errMsg}>Usuário já cadastrado. Escolha outro.</p>}
-        {usernameOk === true  && <p style={{ color: "#4caf50", fontSize: 12, marginTop: -8, marginBottom: 10 }}>✓ Usuário disponível</p>}
-
-        <label style={styles.label}>Senha *</label>
-        <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 4 caracteres" hasError={!!errors.password} />
-        {errors.password && <p style={styles.errMsg}>{errors.password}</p>}
-
-        <label style={styles.label}>Confirmar senha *</label>
-        <PasswordInput value={confirm} onChange={setConfirm} onEnter={handle} placeholder="Repita a senha" hasError={!!errors.confirm} />
-        {errors.confirm && <p style={styles.errMsg}>{errors.confirm}</p>}
-
-        <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Criar Conta e Entrar</button>
-        <p style={{ textAlign: "center", color: "#546e7a", fontSize: 13, marginTop: 14 }}>
-          Já tem conta?{" "}
-          <button onClick={() => setScreen("login")} style={styles.linkBtn}>Entrar</button>
-        </p>
       </div>
     </div>
   );
 }
 
 // ─── DEFINIR NOVA SENHA (obrigatório após reset feito pelo admin) ─────────────
-function ResetPasswordScreen({ currentUser, setUsers, setCurrentUser, setScreen }) {
+function ResetPasswordScreen({ currentUser, setUsers, setCurrentUser, setScreen, isDesktop }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState({});
@@ -808,23 +919,25 @@ function ResetPasswordScreen({ currentUser, setUsers, setCurrentUser, setScreen 
   };
 
   return (
-    <div style={styles.page}>
-      <TopBar title="Definir Nova Senha" onBack={() => {}} />
-      <div style={styles.formBox}>
-        <div style={{ fontSize: 40, textAlign: "center", marginBottom: 8 }}>🔑</div>
-        <p style={{ color: "#90a4ae", textAlign: "center", marginBottom: 4, fontSize: 14 }}>
-          Sua senha foi resetada pelo administrador.
-        </p>
-        <p style={{ color: "#ffd600", textAlign: "center", marginBottom: 20, fontSize: 13, fontWeight: 700 }}>
-          Defina uma nova senha para continuar
-        </p>
-        <label style={styles.label}>Nova senha</label>
-        <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 4 caracteres" hasError={!!errors.password} />
-        {errors.password && <p style={styles.errMsg}>{errors.password}</p>}
-        <label style={styles.label}>Confirmar nova senha</label>
-        <PasswordInput value={confirm} onChange={setConfirm} onEnter={handle} placeholder="Repita a senha" hasError={!!errors.confirm} />
-        {errors.confirm && <p style={styles.errMsg}>{errors.confirm}</p>}
-        <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Salvar Nova Senha</button>
+    <div className="app-page" style={isDesktop ? styles.authPageDesktop : styles.page}>
+      <div style={isDesktop ? styles.authCard : {}}>
+        <TopBar title="Definir Nova Senha" onBack={() => {}} />
+        <div style={styles.formBox}>
+          <div style={{ fontSize: 40, textAlign: "center", marginBottom: 8 }}>🔑</div>
+          <p style={{ color: "#90a4ae", textAlign: "center", marginBottom: 4, fontSize: 14 }}>
+            Sua senha foi resetada pelo administrador.
+          </p>
+          <p style={{ color: "#ffd600", textAlign: "center", marginBottom: 20, fontSize: 13, fontWeight: 700 }}>
+            Defina uma nova senha para continuar
+          </p>
+          <label style={styles.label}>Nova senha</label>
+          <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 4 caracteres" hasError={!!errors.password} />
+          {errors.password && <p style={styles.errMsg}>{errors.password}</p>}
+          <label style={styles.label}>Confirmar nova senha</label>
+          <PasswordInput value={confirm} onChange={setConfirm} onEnter={handle} placeholder="Repita a senha" hasError={!!errors.confirm} />
+          {errors.confirm && <p style={styles.errMsg}>{errors.confirm}</p>}
+          <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Salvar Nova Senha</button>
+        </div>
       </div>
     </div>
   );
@@ -890,7 +1003,7 @@ function EditProfileScreen({ currentUser, setUsers, setCurrentUser, setScreen, a
   };
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <TopBar title="Editar Perfil" onBack={() => setScreen("home")} />
       <div style={styles.formBox}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
@@ -938,7 +1051,7 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
   };
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <div style={styles.hero}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "0 4px" }}>
           <div>
@@ -1098,7 +1211,7 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
   });
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       {modalMatch && <AllPredictionsModal match={modalMatch} users={users} predictions={predictions} onClose={() => setModalMatch(null)} />}
       <TopBar title={`⚽ Palpites — ${currentUser.displayName}`} onBack={() => setScreen("home")} />
 
@@ -1262,7 +1375,7 @@ function PlayerPredictionsModal({ player, matches, predictions, onClose }) {
 function RankingScreen({ ranking, currentUser, setScreen, matches, predictions }) {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       {selectedPlayer && (
         <PlayerPredictionsModal
           player={selectedPlayer}
@@ -1345,7 +1458,7 @@ function GroupsScreen({ matches, setScreen, currentUser }) {
   }
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <TopBar title="🏆 Grupos & Chaveamento" onBack={() => setScreen(currentUser ? "home" : "landing")} />
 
       {groupKeys.length > 0 && Object.keys(knockoutByPhase).length > 0 && (
@@ -1450,7 +1563,7 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
   });
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <TopBar title="📊 Resultados" onBack={() => setScreen(currentUser ? "home" : "landing")} />
       <div style={styles.tabRow}>
         {phases.map(ph => (
@@ -1705,7 +1818,7 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, adminSc
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <TopBar title="Acesso Negado" onBack={() => setScreen("home")} />
       <div style={{ textAlign: "center", padding: "60px 24px" }}>
         <div style={{ fontSize: 48 }}>🚫</div>
@@ -1723,7 +1836,7 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, adminSc
 
 
   return (
-    <div style={styles.page}>
+    <div className="app-page" style={styles.page}>
       <TopBar title="⚙️ Administrador" onBack={() => setScreen("home")} />
       <div style={{ padding: "0 16px" }}>
         <button onClick={handleFetchAI} disabled={loadingAI} style={{ ...styles.btn, ...styles.btnFull, background: loadingAI ? "#37474f" : "#0288d1", color: "#fff", marginBottom: 6 }}>
@@ -1813,6 +1926,17 @@ function TopBar({ title, onBack }) {
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = {
   root: { background: "#0a0e1a", minHeight: "100vh" },
+  desktopShell: { display: "flex", minHeight: "100vh" },
+  sidebar: { width: 268, flexShrink: 0, background: "linear-gradient(180deg,#0d2137 0%,#0a1628 100%)", borderRight: "1px solid rgba(255,255,255,0.08)", padding: "24px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between", position: "sticky", top: 0, height: "100vh", overflowY: "auto" },
+  sidebarBrand: { display: "flex", alignItems: "center", gap: 10, padding: "0 8px 18px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 16 },
+  sidebarProfile: { display: "flex", alignItems: "center", gap: 10, width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px", cursor: "pointer", textAlign: "left" },
+  sidebarNavItem: { display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", borderRadius: 10, padding: "11px 12px", color: "#90a4ae", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left", transition: "background 0.15s" },
+  sidebarNavItemActive: { background: "rgba(255,214,0,0.12)", color: "#ffd600" },
+  sidebarLeaderCard: { background: "rgba(255,214,0,0.06)", border: "1px solid rgba(255,214,0,0.2)", borderRadius: 12, padding: "12px", marginBottom: 12 },
+  sidebarLogout: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "rgba(239,83,80,0.1)", border: "1px solid rgba(239,83,80,0.25)", borderRadius: 10, padding: "10px", color: "#ef5350", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  desktopMain: { flex: 1, minWidth: 0, display: "flex", justifyContent: "center", padding: "32px 24px" },
+  authPageDesktop: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", maxWidth: "none" },
+  authCard: { width: 420, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,0.4)" },
   page: { minHeight: "100vh", background: "linear-gradient(160deg,#0a0e1a 0%,#0d1b2a 60%,#0a1628 100%)", fontFamily: "'Segoe UI',system-ui,sans-serif", color: "#e0e0e0", maxWidth: 480, margin: "0 auto", paddingBottom: 40 },
   hero: { background: "linear-gradient(135deg,#0d2137 0%,#1a3a5c 50%,#0d2137 100%)", borderBottom: "3px solid #ffd600", padding: "28px 20px 20px", textAlign: "center" },
   trophyGlow: { fontSize: 52, lineHeight: 1, marginBottom: 8, filter: "drop-shadow(0 0 20px #ffd60066)" },
