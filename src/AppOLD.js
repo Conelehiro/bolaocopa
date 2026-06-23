@@ -382,7 +382,7 @@ export default function BolaoApp() {
           const found = pool.find(u => String(u.id) === savedId);
           if (found && !found.inactive) {
             setCurrentUserRaw(found);
-            setScreen(found.mustResetPassword ? "reset-password" : "home");
+            setScreen("home");
           } else {
             localStorage.removeItem("bolao:session");
           }
@@ -581,11 +581,6 @@ export default function BolaoApp() {
   const allNonAdminUsers = users.filter(u => !u.isAdmin);
   const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
 
-  // Trava de segurança: se a senha ainda precisa ser trocada, nenhuma outra tela
-  // logada pode ser exibida — força sempre a tela de redefinição.
-  const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin"];
-  const effectiveScreen = (currentUser?.mustResetPassword && protectedScreens.includes(screen)) ? "reset-password" : screen;
-
   return (
     <div style={styles.root}>
       <style>{`
@@ -597,16 +592,14 @@ export default function BolaoApp() {
         ::-webkit-scrollbar-thumb { background:#37474f; border-radius:4px }
       `}</style>
       <Toast toasts={toasts} removeToast={removeToast} />
-      {effectiveScreen === "landing"     && <LandingScreen {...props} />}
-      {effectiveScreen === "login"       && <LoginScreen {...props} allUsers={users} />}
-      {effectiveScreen === "register"    && <RegisterScreen {...props} />}
-      {effectiveScreen === "reset-password" && <ResetPasswordScreen {...props} />}
-      {effectiveScreen === "home"        && <HomeScreen {...props} />}
-      {effectiveScreen === "predictions" && <PredictionsScreen {...props} users={users} />}
-      {effectiveScreen === "ranking"     && <RankingScreen {...props} />}
-      {effectiveScreen === "groups"      && <GroupsScreen {...props} />}
-      {effectiveScreen === "results"     && <ResultsScreen {...props} />}
-      {effectiveScreen === "admin"       && <AdminScreen {...props} addToast={addToast} />}
+      {screen === "landing"     && <LandingScreen {...props} />}
+      {screen === "login"       && <LoginScreen {...props} allUsers={users} />}
+      {screen === "register"    && <RegisterScreen {...props} />}
+      {screen === "home"        && <HomeScreen {...props} />}
+      {screen === "predictions" && <PredictionsScreen {...props} users={users} />}
+      {screen === "ranking"     && <RankingScreen {...props} />}
+      {screen === "results"     && <ResultsScreen {...props} />}
+      {screen === "admin"       && <AdminScreen {...props} addToast={addToast} />}
     </div>
   );
 }
@@ -673,8 +666,7 @@ function LoginScreen({ allUsers, setCurrentUser, setScreen }) {
     const user = users.find(x => x.username.toLowerCase() === u.trim().toLowerCase());
     if (!user || user.passwordHash !== hashPassword(p)) { setErr("Usuário ou senha incorretos."); return; }
     if (user.inactive) { setErr("Sua conta foi desativada. Fale com o administrador."); return; }
-    setCurrentUser(user);
-    setScreen(user.mustResetPassword ? "reset-password" : "home");
+    setCurrentUser(user); setScreen("home");
   };
   return (
     <div style={styles.page}>
@@ -779,47 +771,6 @@ function RegisterScreen({ allUsers, setUsers, setCurrentUser, setScreen }) {
   );
 }
 
-// ─── DEFINIR NOVA SENHA (obrigatório após reset feito pelo admin) ─────────────
-function ResetPasswordScreen({ currentUser, setUsers, setCurrentUser, setScreen }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [errors, setErrors] = useState({});
-
-  const handle = () => {
-    const errs = {};
-    if (password.length < 4) errs.password = "Senha mínima 4 caracteres";
-    if (password !== confirm) errs.confirm = "Senhas não conferem";
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-
-    const newHash = hashPassword(password);
-    setUsers(prev => prev.map(x => x.id === currentUser.id ? { ...x, passwordHash: newHash, mustResetPassword: false } : x));
-    setCurrentUser({ ...currentUser, passwordHash: newHash, mustResetPassword: false });
-    setScreen("home");
-  };
-
-  return (
-    <div style={styles.page}>
-      <TopBar title="Definir Nova Senha" onBack={() => {}} />
-      <div style={styles.formBox}>
-        <div style={{ fontSize: 40, textAlign: "center", marginBottom: 8 }}>🔑</div>
-        <p style={{ color: "#90a4ae", textAlign: "center", marginBottom: 4, fontSize: 14 }}>
-          Sua senha foi resetada pelo administrador.
-        </p>
-        <p style={{ color: "#ffd600", textAlign: "center", marginBottom: 20, fontSize: 13, fontWeight: 700 }}>
-          Defina uma nova senha para continuar
-        </p>
-        <label style={styles.label}>Nova senha</label>
-        <PasswordInput value={password} onChange={setPassword} placeholder="Mínimo 4 caracteres" hasError={!!errors.password} />
-        {errors.password && <p style={styles.errMsg}>{errors.password}</p>}
-        <label style={styles.label}>Confirmar nova senha</label>
-        <PasswordInput value={confirm} onChange={setConfirm} onEnter={handle} placeholder="Repita a senha" hasError={!!errors.confirm} />
-        {errors.confirm && <p style={styles.errMsg}>{errors.confirm}</p>}
-        <button onClick={handle} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Salvar Nova Senha</button>
-      </div>
-    </div>
-  );
-}
-
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActivePhase }) {
   const upcoming = [...matches].filter(m => minutesUntilMatch(m) > 0).sort((a, b) => matchDateTime(a) - matchDateTime(b));
@@ -881,7 +832,6 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
           { icon: "⚽", label: "Meus Palpites", color: "#00bcd4", screen: "predictions" },
           { icon: "🏅", label: "Classificação",  color: "#ff9800", screen: "ranking" },
           { icon: "📊", label: "Resultados",      color: "#4caf50", screen: "results" },
-          { icon: "🏆", label: "Grupos",          color: "#ab47bc", screen: "groups" },
           ...(currentUser.isAdmin ? [{ icon: "🔐", label: "Admin", color: "#ef5350", screen: "admin" }] : []),
         ].map(c => (
           <button key={c.screen} onClick={() => setScreen(c.screen)} style={{ ...styles.actionCard, borderColor: c.color + "55", background: c.color + "18" }}>
@@ -1105,136 +1055,6 @@ function RankingScreen({ ranking, currentUser, setScreen }) {
   );
 }
 
-// ─── CLASSIFICAÇÃO DE GRUPOS ───────────────────────────────────────────────────
-// Calcula pontos, saldo de gols, gols pró/contra de cada seleção a partir dos
-// jogos da Fase de Grupos já com placar lançado.
-function computeGroupStandings(matches) {
-  const groupMatches = matches.filter(m => m.phase === "Fase de Grupos" && m.group);
-  const groups = {};
-  for (const m of groupMatches) {
-    if (!groups[m.group]) groups[m.group] = {};
-    const table = groups[m.group];
-    if (!table[m.home]) table[m.home] = { team: m.home, pts: 0, v: 0, e: 0, d: 0, gp: 0, gc: 0, j: 0 };
-    if (!table[m.away]) table[m.away] = { team: m.away, pts: 0, v: 0, e: 0, d: 0, gp: 0, gc: 0, j: 0 };
-    if (m.homeScore === null || m.awayScore === null) continue;
-    const home = table[m.home], away = table[m.away];
-    home.j++; away.j++;
-    home.gp += m.homeScore; home.gc += m.awayScore;
-    away.gp += m.awayScore; away.gc += m.homeScore;
-    if (m.homeScore > m.awayScore) { home.v++; home.pts += 3; away.d++; }
-    else if (m.homeScore < m.awayScore) { away.v++; away.pts += 3; home.d++; }
-    else { home.e++; away.e++; home.pts += 1; away.pts += 1; }
-  }
-  const result = {};
-  for (const g of Object.keys(groups).sort()) {
-    result[g] = Object.values(groups[g])
-      .map(t => ({ ...t, sg: t.gp - t.gc }))
-      .sort((a, b) => b.pts - a.pts || b.sg - a.sg || b.gp - a.gp);
-  }
-  return result;
-}
-
-// ─── GRUPOS / CHAVEAMENTO ───────────────────────────────────────────────────────
-function GroupsScreen({ matches, setScreen, currentUser }) {
-  const groupMatches = matches.filter(m => m.phase === "Fase de Grupos");
-  const groupsFinished = groupMatches.length > 0 && groupMatches.every(m => m.homeScore !== null);
-  const [view, setView] = useState(groupsFinished ? "bracket" : "groups");
-  const standings = computeGroupStandings(matches);
-  const groupKeys = Object.keys(standings);
-
-  const knockoutPhases = ["Segunda Fase", "Oitavas de Final", "Quartas de Final", "Semifinal", "Disputa 3º Lugar", "Final"];
-  const knockoutByPhase = {};
-  for (const ph of knockoutPhases) {
-    const list = matches.filter(m => m.phase === ph);
-    if (list.length) knockoutByPhase[ph] = [...list].sort((a, b) => matchDateTime(a) - matchDateTime(b));
-  }
-
-  return (
-    <div style={styles.page}>
-      <TopBar title="🏆 Grupos & Chaveamento" onBack={() => setScreen(currentUser ? "home" : "landing")} />
-
-      {groupKeys.length > 0 && Object.keys(knockoutByPhase).length > 0 && (
-        <div style={{ display: "flex", gap: 8, padding: "12px 16px 0" }}>
-          <button onClick={() => setView("groups")} style={{ flex: 1, background: view === "groups" ? "#ffd600" : "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: view === "groups" ? "#0a0e1a" : "#90a4ae", fontWeight: 700, fontSize: 13, padding: "9px", cursor: "pointer" }}>
-            📋 Grupos
-          </button>
-          <button onClick={() => setView("bracket")} style={{ flex: 1, background: view === "bracket" ? "#ffd600" : "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: view === "bracket" ? "#0a0e1a" : "#90a4ae", fontWeight: 700, fontSize: 13, padding: "9px", cursor: "pointer" }}>
-            🏆 Mata-mata
-          </button>
-        </div>
-      )}
-
-      {groupKeys.length === 0 && (
-        <p style={{ color: "#546e7a", textAlign: "center", padding: "40px 24px" }}>
-          Os jogos ainda não foram carregados. Peça ao admin para buscar a tabela oficial.
-        </p>
-      )}
-
-      {/* ── TABELA DOS GRUPOS ── */}
-      {view === "groups" && groupKeys.length > 0 && (
-        <div style={{ padding: "12px 16px 32px" }}>
-          {groupKeys.map(g => (
-            <div key={g} style={{ marginBottom: 18 }}>
-              <h3 style={{ color: "#ffd600", fontSize: 14, fontWeight: 800, margin: "0 0 8px" }}>Grupo {g}</h3>
-              <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 28px 28px 28px", padding: "6px 10px", background: "rgba(255,255,255,0.05)", fontSize: 10, color: "#78909c", fontWeight: 700 }}>
-                  <span>Seleção</span><span style={{ textAlign: "center" }}>J</span><span style={{ textAlign: "center" }}>SG</span><span style={{ textAlign: "center" }}>GP</span><span style={{ textAlign: "center" }}>Pts</span>
-                </div>
-                {standings[g].map((t, i) => (
-                  <div key={t.team} style={{ display: "grid", gridTemplateColumns: "1fr 28px 28px 28px 28px", padding: "8px 10px", fontSize: 12, color: i < 2 ? "#e0e0e0" : "#78909c", borderTop: "1px solid rgba(255,255,255,0.05)", background: i < 2 ? "rgba(76,175,80,0.06)" : "transparent" }}>
-                    <span style={{ fontWeight: i < 2 ? 700 : 500, display: "flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ color: "#546e7a", fontSize: 10, width: 14 }}>{i + 1}º</span>{t.team}
-                    </span>
-                    <span style={{ textAlign: "center" }}>{t.j}</span>
-                    <span style={{ textAlign: "center" }}>{t.sg > 0 ? `+${t.sg}` : t.sg}</span>
-                    <span style={{ textAlign: "center" }}>{t.gp}</span>
-                    <span style={{ textAlign: "center", fontWeight: 800, color: i < 2 ? "#4caf50" : "#90a4ae" }}>{t.pts}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-          <p style={{ color: "#546e7a", fontSize: 11, textAlign: "center", marginTop: 8 }}>
-            🟢 Os dois primeiros de cada grupo avançam de fase
-          </p>
-        </div>
-      )}
-
-      {/* ── CHAVEAMENTO MATA-MATA ── */}
-      {view === "bracket" && (
-        <div style={{ padding: "12px 16px 32px" }}>
-          {Object.keys(knockoutByPhase).length === 0 && (
-            <p style={{ color: "#546e7a", textAlign: "center", padding: "40px 24px" }}>
-              O chaveamento aparece aqui assim que a fase de grupos terminar.
-            </p>
-          )}
-          {Object.entries(knockoutByPhase).map(([phase, list]) => (
-            <div key={phase} style={{ marginBottom: 18 }}>
-              <h3 style={{ color: "#ffd600", fontSize: 14, fontWeight: 800, margin: "0 0 8px" }}>{phase}</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {list.map(m => (
-                  <div key={m.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-                    <div style={{ fontSize: 10, color: "#78909c", marginBottom: 6 }}>📅 {m.date} {m.time}</div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1 }}>{m.home}</span>
-                      {m.homeScore !== null ? (
-                        <span style={{ fontWeight: 800, color: "#fff", background: "rgba(255,255,255,0.08)", padding: "2px 10px", borderRadius: 8, fontSize: 13 }}>{m.homeScore} × {m.awayScore}</span>
-                      ) : (
-                        <span style={{ color: "#546e7a", fontSize: 11 }}>vs</span>
-                      )}
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1, textAlign: "right" }}>{m.away}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── RESULTS ──────────────────────────────────────────────────────────────────
 function ResultsScreen({ matches, predictions, users, setScreen, currentUser, phases, activePhase, setActivePhase }) {
   const [expanded, setExpanded] = useState({});
@@ -1441,19 +1261,13 @@ function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, set
 }
 
 // ─── ADMIN USERS PANEL ───────────────────────────────────────────────────────
-function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
+function AdminUsersPanel({ allNonAdminUsers, setUsers }) {
   const [filter, setFilter] = useState("all"); // all | active | inactive
   const inactive = allNonAdminUsers.filter(u => u.inactive);
   const active   = allNonAdminUsers.filter(u => !u.inactive);
   const shown = filter === "inactive" ? inactive : filter === "active" ? active : allNonAdminUsers;
 
   const toggle = (id) => setUsers(prev => prev.map(x => x.id === id ? { ...x, inactive: !x.inactive } : x));
-
-  const resetPassword = (u) => {
-    if (!window.confirm(`Resetar a senha de ${u.displayName} para "1234"? O jogador será obrigado a criar uma nova senha no próximo login.`)) return;
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, passwordHash: hashPassword("1234"), mustResetPassword: true } : x));
-    addToast?.(`🔑 Senha de ${u.displayName} resetada para 1234.`, "success");
-  };
 
   return (
     <div style={styles.infoCard2}>
@@ -1482,16 +1296,9 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
               <div style={{ fontWeight: 600, fontSize: 13, color: u.inactive ? "#546e7a" : "#e0e0e0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {u.displayName}
                 {u.inactive && <span style={{ fontSize: 10, color: "#ef5350", fontWeight: 700, background: "rgba(239,83,80,0.15)", padding: "1px 6px", borderRadius: 8 }}>INATIVO</span>}
-                {u.mustResetPassword && <span style={{ fontSize: 10, color: "#ffd600", fontWeight: 700, background: "rgba(255,214,0,0.15)", padding: "1px 6px", borderRadius: 8 }}>SENHA PENDENTE</span>}
               </div>
               <div style={{ fontSize: 11, color: "#546e7a" }}>@{u.username}</div>
             </div>
-            <button
-              onClick={() => resetPassword(u)}
-              style={{ background: "rgba(255,214,0,0.12)", border: "1px solid rgba(255,214,0,0.3)", borderRadius: 8, color: "#ffd600", fontSize: 11, fontWeight: 700, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap" }}
-            >
-              🔑 Resetar
-            </button>
             <button
               onClick={() => toggle(u.id)}
               style={{ background: u.inactive ? "rgba(76,175,80,0.15)" : "rgba(239,83,80,0.15)", border: `1px solid ${u.inactive ? "rgba(76,175,80,0.35)" : "rgba(239,83,80,0.35)"}`, borderRadius: 8, color: u.inactive ? "#4caf50" : "#ef5350", fontSize: 11, fontWeight: 700, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap" }}
@@ -1572,7 +1379,7 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, adminSc
 
         <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} addToast={addToast} />
 
-        <AdminUsersPanel allNonAdminUsers={allNonAdminUsers} setUsers={setUsers} addToast={addToast} />
+        <AdminUsersPanel allNonAdminUsers={allNonAdminUsers} setUsers={setUsers} />
 
         <div style={styles.tabRow}>
           {phases.map(ph => (
