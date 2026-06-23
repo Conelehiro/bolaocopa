@@ -294,7 +294,16 @@ function findScoreUpdates(currentMatches, fetchedMatches) {
 }
 
 // ─── AVATAR ───────────────────────────────────────────────────────────────────
-const Avatar = ({ name, size = 36 }) => {
+const Avatar = ({ name, size = 36, photoUrl }) => {
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: "2px solid rgba(255,255,255,0.15)" }}
+      />
+    );
+  }
   const initials = name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
   const colors = ["#ff6b35","#00bcd4","#9c27b0","#4caf50","#ff9800","#e91e63","#2196f3","#ff5722"];
   return (
@@ -583,7 +592,7 @@ export default function BolaoApp() {
 
   // Trava de segurança: se a senha ainda precisa ser trocada, nenhuma outra tela
   // logada pode ser exibida — força sempre a tela de redefinição.
-  const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin"];
+  const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin", "edit-profile"];
   const effectiveScreen = (currentUser?.mustResetPassword && protectedScreens.includes(screen)) ? "reset-password" : screen;
 
   return (
@@ -602,6 +611,7 @@ export default function BolaoApp() {
       {effectiveScreen === "register"    && <RegisterScreen {...props} />}
       {effectiveScreen === "reset-password" && <ResetPasswordScreen {...props} />}
       {effectiveScreen === "home"        && <HomeScreen {...props} />}
+      {effectiveScreen === "edit-profile" && <EditProfileScreen {...props} addToast={addToast} />}
       {effectiveScreen === "predictions" && <PredictionsScreen {...props} users={users} />}
       {effectiveScreen === "ranking"     && <RankingScreen {...props} />}
       {effectiveScreen === "groups"      && <GroupsScreen {...props} />}
@@ -820,6 +830,99 @@ function ResetPasswordScreen({ currentUser, setUsers, setCurrentUser, setScreen 
   );
 }
 
+// ─── EDITAR PERFIL (nome + foto) ───────────────────────────────────────────────
+const MAX_PHOTO_BYTES = 600 * 1024; // limite de segurança antes de comprimir
+
+function compressImageToDataUrl(file, maxSize = 240, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height) { if (width > maxSize) { height = Math.round(height * maxSize / width); width = maxSize; } }
+      else { if (height > maxSize) { width = Math.round(width * maxSize / height); height = maxSize; } }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function EditProfileScreen({ currentUser, setUsers, setCurrentUser, setScreen, addToast }) {
+  const [displayName, setDisplayName] = useState(currentUser.displayName);
+  const [photoUrl, setPhotoUrl] = useState(currentUser.photoUrl || null);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Selecione um arquivo de imagem."); return; }
+    setError(""); setUploading(true);
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      if (dataUrl.length > MAX_PHOTO_BYTES) {
+        setError("Imagem muito grande mesmo após compressão. Tente outra foto.");
+      } else {
+        setPhotoUrl(dataUrl);
+      }
+    } catch {
+      setError("Não foi possível processar essa imagem.");
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleSave = () => {
+    const name = displayName.trim();
+    if (!name) { setError("O nome não pode ficar em branco."); return; }
+    setUsers(prev => prev.map(x => x.id === currentUser.id ? { ...x, displayName: name, photoUrl } : x));
+    setCurrentUser({ ...currentUser, displayName: name, photoUrl });
+    addToast?.("✅ Perfil atualizado!", "success");
+    setScreen("home");
+  };
+
+  return (
+    <div style={styles.page}>
+      <TopBar title="Editar Perfil" onBack={() => setScreen("home")} />
+      <div style={styles.formBox}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ position: "relative" }}>
+            <Avatar name={displayName || currentUser.displayName} photoUrl={photoUrl} size={88} />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              style={{ position: "absolute", bottom: -2, right: -2, width: 32, height: 32, borderRadius: "50%", background: "#ffd600", border: "2px solid #0a0e1a", color: "#0a0e1a", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              title="Trocar foto"
+            >
+              {uploading ? "⏳" : "📷"}
+            </button>
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoChange} style={{ display: "none" }} />
+          {photoUrl && (
+            <button onClick={() => setPhotoUrl(null)} style={{ background: "none", border: "none", color: "#546e7a", fontSize: 12, marginTop: 10, cursor: "pointer", textDecoration: "underline" }}>
+              Remover foto
+            </button>
+          )}
+        </div>
+
+        <label style={styles.label}>Nome (aparece no ranking)</label>
+        <input value={displayName} onChange={e => setDisplayName(e.target.value)} style={styles.input} placeholder="Seu nome" />
+        {error && <p style={styles.errMsg}>{error}</p>}
+
+        <button onClick={handleSave} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8 }}>Salvar Alterações</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActivePhase }) {
   const upcoming = [...matches].filter(m => minutesUntilMatch(m) > 0).sort((a, b) => matchDateTime(a) - matchDateTime(b));
@@ -840,7 +943,16 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "0 4px" }}>
           <div>
             <p style={{ color: "#78909c", fontSize: 12, margin: "0 0 2px" }}>Bem-vindo,</p>
-            <h2 style={{ margin: 0, fontWeight: 800, fontSize: 20, color: "#fff" }}>{currentUser.displayName}</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 style={{ margin: 0, fontWeight: 800, fontSize: 20, color: "#fff" }}>{currentUser.displayName}</h2>
+              <button
+                onClick={() => setScreen("edit-profile")}
+                style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 11, padding: 0 }}
+                title="Editar perfil"
+              >
+                ✏️
+              </button>
+            </div>
           </div>
           <button onClick={logout} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#78909c", padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>Sair</button>
         </div>
@@ -897,7 +1009,7 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
           {ranking.slice(0, 3).map((p, i) => (
             <div key={p.id} style={{ ...styles.rankRow, ...(p.id === currentUser.id ? { background: "rgba(255,214,0,0.06)", borderRadius: 10, padding: "8px 10px" } : {}) }}>
               <span style={{ fontSize: 20, width: 28 }}>{["🥇","🥈","🥉"][i]}</span>
-              <Avatar name={p.displayName} />
+              <Avatar name={p.displayName} photoUrl={p.photoUrl} />
               <span style={{ flex: 1, marginLeft: 10, fontWeight: 600, fontSize: 14 }}>{p.displayName}</span>
               <span style={{ fontWeight: 800, fontSize: 16, color: "#ffd600" }}>{p.total} pts</span>
             </div>
@@ -934,7 +1046,7 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
             const res = pts !== null ? getResultLabel(pts, match.phase) : null;
             return (
               <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, background: noPred ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)", borderRadius: 10, padding: "10px 12px", border: `1px solid ${res ? res.color + "44" : "rgba(255,255,255,0.07)"}` }}>
-                <Avatar name={u.displayName} size={34} />
+                <Avatar name={u.displayName} size={34} photoUrl={u.photoUrl} />
                 <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: noPred ? "#546e7a" : "#e0e0e0" }}>{u.displayName}</span>
                 {noPred ? (
                   <span style={{ color: "#37474f", fontSize: 12, fontStyle: "italic" }}>sem palpite</span>
@@ -1077,18 +1189,101 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
 }
 
 // ─── RANKING ──────────────────────────────────────────────────────────────────
-function RankingScreen({ ranking, currentUser, setScreen }) {
+// ─── PALPITES DE UM JOGADOR (modal a partir do ranking) ───────────────────────
+// Mostra só os jogos cujo período de apostas já encerrou — nunca revela
+// palpites de jogos ainda abertos, mesmo no histórico pessoal de outro jogador.
+function PlayerPredictionsModal({ player, matches, predictions, onClose }) {
+  const myPreds = predictions[player.id] || {};
+  const finished = [...matches.filter(m => isLocked(m))].sort((a, b) => matchDateTime(b) - matchDateTime(a));
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#0f1e30", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, padding: "20px 20px 32px", border: "1px solid rgba(255,255,255,0.12)", borderBottom: "none", maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ width: 40, height: 4, background: "#37474f", borderRadius: 2, margin: "0 auto 18px" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <Avatar name={player.displayName} size={40} photoUrl={player.photoUrl} />
+          <div style={{ flex: 1 }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16, color: "#fff" }}>{player.displayName}</h3>
+            <p style={{ margin: 0, color: "#78909c", fontSize: 11 }}>{player.total} pontos • {player.exact} placar(es) cravado(s)</p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: "#90a4ae", fontSize: 16, cursor: "pointer", flexShrink: 0 }}
+            title="Fechar"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p style={{ color: "#546e7a", fontSize: 11, marginBottom: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          Palpites em jogos encerrados
+        </p>
+
+        {finished.length === 0 && (
+          <p style={{ color: "#546e7a", fontSize: 13, textAlign: "center", padding: "20px 0" }}>Nenhum jogo encerrado ainda.</p>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {finished.map(m => {
+            const pred = myPreds[m.id];
+            const noPred = !hasPred(pred);
+            const pts = (noPred || m.homeScore === null) ? 0 : calcPoints(pred, m, m.phase);
+            const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase);
+            return (
+              <div key={m.id} style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${res ? res.color + "33" : "rgba(255,255,255,0.07)"}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: "#78909c" }}>{m.phase}{m.group ? ` • Grupo ${m.group}` : ""}</span>
+                  <span style={{ fontSize: 10, color: "#546e7a" }}>{m.date}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1 }}>{m.home}</span>
+                  {m.homeScore !== null && (
+                    <span style={{ fontSize: 11, color: "#78909c", whiteSpace: "nowrap" }}>{m.homeScore}×{m.awayScore}</span>
+                  )}
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1, textAlign: "right" }}>{m.away}</span>
+                </div>
+                <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  {noPred ? (
+                    <span style={{ fontSize: 12, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
+                  ) : (
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#cfd8dc" }}>Palpite: {pred.home} × {pred.away}</span>
+                  )}
+                  {res && <span style={{ fontSize: 11, fontWeight: 700, color: res.color }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RankingScreen({ ranking, currentUser, setScreen, matches, predictions }) {
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
   return (
     <div style={styles.page}>
+      {selectedPlayer && (
+        <PlayerPredictionsModal
+          player={selectedPlayer}
+          matches={matches}
+          predictions={predictions}
+          onClose={() => setSelectedPlayer(null)}
+        />
+      )}
       <TopBar title="🏅 Classificação" onBack={() => setScreen(currentUser ? "home" : "landing")} />
       <div style={{ padding: "12px 16px 32px" }}>
         <p style={{ color: "#546e7a", textAlign: "center", fontSize: 12, marginBottom: 16 }}>
-          {ranking.length} participante(s) • Desempate: placares cravados
+          {ranking.length} participante(s) • Desempate: placares cravados • Toque num jogador para ver os palpites
         </p>
         {ranking.map((p, i) => (
-          <div key={p.id} style={{ ...styles.rankCard, ...(i===0?styles.rankFirst:i===1?styles.rankSecond:i===2?styles.rankThird:{}), ...(currentUser?.id===p.id?{outline:"2px solid #ffd600"}:{}) }}>
+          <div
+            key={p.id}
+            onClick={() => setSelectedPlayer(p)}
+            style={{ ...styles.rankCard, cursor: "pointer", ...(i===0?styles.rankFirst:i===1?styles.rankSecond:i===2?styles.rankThird:{}), ...(currentUser?.id===p.id?{outline:"2px solid #ffd600"}:{}) }}
+          >
             <span style={{ fontSize: 22, width: 32, textAlign: "center" }}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}º`}</span>
-            <Avatar name={p.displayName} size={40} />
+            <Avatar name={p.displayName} size={40} photoUrl={p.photoUrl} />
             <div style={{ flex: 1, marginLeft: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: currentUser?.id===p.id?"#ffd600":"#e0e0e0" }}>{p.displayName} {currentUser?.id===p.id&&"(você)"}</div>
               <div style={{ fontSize: 11, color: "#78909c" }}>🎯 {p.exact} placar(es) cravado(s)</div>
@@ -1305,7 +1500,7 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
                         const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase);
                         return (
                           <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                            <Avatar name={u.displayName} size={22} />
+                            <Avatar name={u.displayName} size={22} photoUrl={u.photoUrl} />
                             <span style={{ marginLeft: 8, fontSize: 12, color: "#90a4ae", flex: 1 }}>{u.displayName}</span>
                             {noPred
                               ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
@@ -1477,7 +1672,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {shown.map(u => (
           <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, background: u.inactive ? "rgba(239,83,80,0.06)" : "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 10px", border: `1px solid ${u.inactive ? "rgba(239,83,80,0.25)" : "rgba(255,255,255,0.07)"}` }}>
-            <Avatar name={u.displayName} size={30} />
+            <Avatar name={u.displayName} size={30} photoUrl={u.photoUrl} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 13, color: u.inactive ? "#546e7a" : "#e0e0e0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {u.displayName}
