@@ -1,0 +1,18 @@
+name: Manter Supabase Ativo
+
+# Roda automaticamente 2x por semana (domingo e quarta, à meia-noite UTC)
+# e também pode ser disparado manualmente pela aba "Actions" no GitHub.
+on:
+  schedule:
+    - cron: "0 0 * * 0,3"
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping na tabela bolao_data
+        run: |
+          curl -s -o /dev/null -w "Status: %{http_code}\n" \
+            "https://ggjjysldvldpshvilcnr.supabase.co/rest/v1/bolao_data?select=key&limit=1" \
+            -H "apikey: sb_publishable_O76sReUKmdK-6mUS5uohBA_BqqmS-wC"
