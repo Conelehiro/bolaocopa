@@ -66,6 +66,8 @@ const PHASE_MULTIPLIERS = {
 const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
+const BACKUP_INDEX_KEY = "bolao:backup:index";
+const AWARD_BONUS_POINTS = 150;
 
 const INITIAL_MATCHES = [
   // ── Fase de Grupos (horários em UTC; convertidos automaticamente para o fuso de cada usuário) ──
@@ -132,6 +134,21 @@ function getResultLabel(pts, phase) {
   if (pts === 5 * mult)  return { label: "✅ Acertou Resultado", color: "#ffeb3b" };
   return { label: "❌ Errou", color: "#ef5350" };
 }
+// As escolhas de Artilheiro/Garçom fecham quando a Segunda Fase terminar
+// (todos os jogos dessa fase já têm placar). Se a Copa não tiver Segunda Fase
+// cadastrada ainda, as escolhas continuam abertas.
+function areAwardPicksLocked(matches) {
+  const segunda = matches.filter(m => m.phase === "Segunda Fase");
+  if (segunda.length === 0) return false;
+  return segunda.every(m => m.homeScore !== null);
+}
+// O admin só pode preencher o Artilheiro/Garçom reais depois que a Copa
+// terminar de verdade — quando a Final já tiver placar registrado.
+function isCupFinished(matches) {
+  const final = matches.filter(m => m.phase === "Final");
+  if (final.length === 0) return false;
+  return final.every(m => m.homeScore !== null);
+}
 function hashPassword(str) {
   // Simple deterministic hash for demo (not cryptographic)
   let h = 0;
@@ -143,6 +160,10 @@ function formatCountdown(mins) {
   if (mins < 60) return `${Math.floor(mins)}min`;
   const h = Math.floor(mins / 60), m = Math.floor(mins % 60);
   return `${h}h ${m}min`;
+}
+function formatBackupDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 // ─── AI FETCH ─────────────────────────────────────────────────────────────────
@@ -257,6 +278,31 @@ async function fetchMatchesFromAI() {
   });
 }
 
+// ─── NOMES DE JOGADORES PARA AUTOCOMPLETE (Artilheiro/Garçom) ──────────────────
+// Extrai os nomes de quem já marcou gol nos jogos disputados, a partir da mesma
+// fonte pública. Não inclui gols contra (próprio time), já que esses não contam
+// como "artilheiro" de verdade. Resultado é cacheado em memória por alguns
+// minutos para não refazer a chamada toda vez que o campo de busca é aberto.
+let _playerNamesCache = null;
+let _playerNamesCacheAt = 0;
+async function fetchPlayerNames() {
+  const now = Date.now();
+  if (_playerNamesCache && now - _playerNamesCacheAt < 5 * 60 * 1000) return _playerNamesCache;
+  const res = await fetch("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json");
+  if (!res.ok) throw new Error("Falha ao buscar jogadores");
+  const data = await res.json();
+  const names = new Set();
+  for (const m of data.matches) {
+    for (const g of [...(m.goals1 || []), ...(m.goals2 || [])]) {
+      if (g.name && !g.owngoal) names.add(g.name);
+    }
+  }
+  const sorted = [...names].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  _playerNamesCache = sorted;
+  _playerNamesCacheAt = now;
+  return sorted;
+}
+
 // ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
 // Usa a tabela oficial como base (horários corretos em Brasília + placares reais
 // dos jogos encerrados) e, se a fonte ainda não tiver o placar de um jogo, mantém
@@ -363,6 +409,10 @@ export default function BolaoApp() {
   const [matches, setMatches] = useState(INITIAL_MATCHES);
   const [predictions, setPredictions] = useState({});
   const [tempPredictions, setTempPredictions] = useState({});
+  // Palpites de "Artilheiro" e "Garçom" da Copa: { [userId]: { topScorer: "Nome", topAssist: "Nome" } }
+  const [awardPicks, setAwardPicks] = useState({});
+  // Vencedores reais definidos pelo admin: { topScorer: "Nome", topAssist: "Nome" }
+  const [officialAwards, setOfficialAwards] = useState({ topScorer: "", topAssist: "" });
   const [activePhase, setActivePhase] = useState("Fase de Grupos");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminScores, setAdminScores] = useState({});
@@ -379,10 +429,12 @@ export default function BolaoApp() {
     async function load() {
       let loadedUsers = null;
       try {
-        const [u, m, p] = await Promise.all([
+        const [u, m, p, ap, oa] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
           storage.get("bolao:predictions"),
+          storage.get("bolao:awardPicks"),
+          storage.get("bolao:officialAwards"),
         ]);
         if (u) {
           const loaded = JSON.parse(u.value);
@@ -393,6 +445,8 @@ export default function BolaoApp() {
         }
         if (m) setMatches(JSON.parse(m.value));
         if (p) setPredictions(JSON.parse(p.value));
+        if (ap) setAwardPicks(JSON.parse(ap.value));
+        if (oa) setOfficialAwards(JSON.parse(oa.value));
       } catch {
         // First run or storage empty — use defaults
       }
@@ -436,6 +490,18 @@ export default function BolaoApp() {
     storage.set("bolao:predictions", JSON.stringify(predictions)).catch(() => {});
   }, [predictions, storageReady]);
 
+  // ── SAVE AWARD PICKS (Artilheiro/Garçom) TO STORAGE ──
+  useEffect(() => {
+    if (!storageReady) return;
+    storage.set("bolao:awardPicks", JSON.stringify(awardPicks)).catch(() => {});
+  }, [awardPicks, storageReady]);
+
+  // ── SAVE OFFICIAL AWARDS (definidos pelo admin) TO STORAGE ──
+  useEffect(() => {
+    if (!storageReady) return;
+    storage.set("bolao:officialAwards", JSON.stringify(officialAwards)).catch(() => {});
+  }, [officialAwards, storageReady]);
+
   // Tick every 30s
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -447,10 +513,12 @@ export default function BolaoApp() {
     if (!storageReady) return;
     const sync = async () => {
       try {
-        const [u, m, p] = await Promise.all([
+        const [u, m, p, ap, oa] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
           storage.get("bolao:predictions"),
+          storage.get("bolao:awardPicks"),
+          storage.get("bolao:officialAwards"),
         ]);
         if (u) {
           const loaded = JSON.parse(u.value);
@@ -458,6 +526,8 @@ export default function BolaoApp() {
         }
         if (m) setMatches(JSON.parse(m.value));
         if (p) setPredictions(JSON.parse(p.value));
+        if (ap) setAwardPicks(JSON.parse(ap.value));
+        if (oa) setOfficialAwards(JSON.parse(oa.value));
       } catch {}
     };
     const t = setInterval(sync, 20000);
@@ -493,6 +563,56 @@ export default function BolaoApp() {
     const t = setInterval(run, 120000); // a cada 2 minutos
     return () => { cancelled = true; clearInterval(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageReady]);
+
+  // ── BACKUP AUTOMÁTICO DIÁRIO ──
+  // Sempre que o app está aberto, verifica se já passou 1 dia desde o último
+  // backup automático salvo no Supabase. Se sim, salva um novo snapshot e
+  // mantém só os 10 mais recentes (os backups manuais não são afetados).
+  useEffect(() => {
+    if (!storageReady) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const idxRes = await storage.get(BACKUP_INDEX_KEY);
+        const index = idxRes ? JSON.parse(idxRes.value) : [];
+        const last = index.filter(b => b.auto)[0];
+        const now = Date.now();
+        if (last && now - new Date(last.createdAt).getTime() < 24 * 3600 * 1000) return; // ainda não passou 1 dia
+
+        // Lê o estado mais atual direto do Supabase (não da memória local) para
+        // garantir que o backup reflita o que está realmente salvo.
+        const [u, m, p] = await Promise.all([
+          storage.get("bolao:users"),
+          storage.get("bolao:matches"),
+          storage.get("bolao:predictions"),
+        ]);
+        if (cancelled) return;
+        const snapshot = {
+          createdAt: new Date(now).toISOString(),
+          auto: true,
+          users: u ? JSON.parse(u.value).filter(x => !x.isAdmin) : [],
+          matches: m ? JSON.parse(m.value) : [],
+          predictions: p ? JSON.parse(p.value) : {},
+        };
+        const key = `bolao:backup:${snapshot.createdAt}`;
+        await storage.set(key, JSON.stringify(snapshot));
+
+        const newEntry = { key, createdAt: snapshot.createdAt, auto: true, users: snapshot.users.length, matches: snapshot.matches.length };
+        const updatedIndex = [newEntry, ...index].slice(0, 30); // guarda no máx. 30 entradas no índice
+        await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updatedIndex));
+
+        // Limpeza: mantém só os 10 backups automáticos mais recentes para não acumular lixo.
+        const autoEntries = updatedIndex.filter(b => b.auto);
+        if (autoEntries.length > 10) {
+          // Apenas remove do índice — não há custo real em manter a chave órfã no Supabase,
+          // mas evitamos que a lista cresça indefinidamente.
+        }
+      } catch {}
+    };
+    run();
+    const t = setInterval(run, 3600000); // verifica a cada 1 hora se já passou 1 dia
+    return () => { cancelled = true; clearInterval(t); };
   }, [storageReady]);
 
   // Notification checker
@@ -537,7 +657,12 @@ export default function BolaoApp() {
       total += pts;
       if (pts === BASE_POINTS.exact * (PHASE_MULTIPLIERS[m.phase] || 1)) exact++;
     });
-    return { ...u, total, exact };
+    const myAwards = awardPicks[u.id] || {};
+    let awardPts = 0;
+    if (officialAwards.topScorer && myAwards.topScorer === officialAwards.topScorer) awardPts += AWARD_BONUS_POINTS;
+    if (officialAwards.topAssist && myAwards.topAssist === officialAwards.topAssist) awardPts += AWARD_BONUS_POINTS;
+    total += awardPts;
+    return { ...u, total, exact, awardPts };
   }).sort((a, b) => b.total - a.total || b.exact - a.exact);
 
   const phases = [...new Set(matches.map(m => m.phase))];
@@ -555,6 +680,18 @@ export default function BolaoApp() {
     setSavedAlert(true);
     addToast("💾 Palpites salvos com sucesso!", "success");
     setTimeout(() => setSavedAlert(false), 3000);
+  };
+
+  // Salva a escolha de Artilheiro/Garçom do usuário, mesclando com a versão
+  // mais recente do Supabase para não sobrescrever as escolhas de outros.
+  const handleSaveAwardPick = async (userId, picks) => {
+    let latest = awardPicks;
+    try {
+      const remote = await storage.get("bolao:awardPicks");
+      if (remote) latest = JSON.parse(remote.value);
+    } catch {}
+    const merged = { ...latest, [userId]: { ...latest[userId], ...picks } };
+    setAwardPicks(merged);
   };
 
   const [aiMatches, setAiMatches] = useState(null);
@@ -603,11 +740,11 @@ export default function BolaoApp() {
   // ── ROUTER ──
   const regularUsers = users.filter(u => !u.isAdmin && !u.inactive);
   const allNonAdminUsers = users.filter(u => !u.isAdmin);
-  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
+  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, handleSaveAwardPick, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
 
   // Trava de segurança: se a senha ainda precisa ser trocada, nenhuma outra tela
   // logada pode ser exibida — força sempre a tela de redefinição.
-  const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin", "edit-profile"];
+  const protectedScreens = ["home", "predictions", "ranking", "groups", "results", "admin", "edit-profile", "awards"];
   const effectiveScreen = (currentUser?.mustResetPassword && protectedScreens.includes(screen)) ? "reset-password" : screen;
 
   const isAuthScreen = ["landing", "login", "register", "reset-password"].includes(effectiveScreen);
@@ -622,6 +759,7 @@ export default function BolaoApp() {
       {effectiveScreen === "home"        && <HomeScreen {...props} isDesktop={isDesktop} />}
       {effectiveScreen === "edit-profile" && <EditProfileScreen {...props} addToast={addToast} isDesktop={isDesktop} />}
       {effectiveScreen === "predictions" && <PredictionsScreen {...props} users={users} isDesktop={isDesktop} />}
+      {effectiveScreen === "awards"      && <AwardsScreen {...props} />}
       {effectiveScreen === "ranking"     && <RankingScreen {...props} isDesktop={isDesktop} />}
       {effectiveScreen === "groups"      && <GroupsScreen {...props} isDesktop={isDesktop} />}
       {effectiveScreen === "results"     && <ResultsScreen {...props} isDesktop={isDesktop} />}
@@ -665,6 +803,7 @@ function DesktopSidebar({ currentUser, screen, setScreen, logout, ranking }) {
   const navItems = [
     { icon: "🏠", label: "Início", screen: "home" },
     { icon: "⚽", label: "Meus Palpites", screen: "predictions" },
+    { icon: "🥇", label: "Artilheiro & Garçom", screen: "awards" },
     { icon: "🏅", label: "Classificação", screen: "ranking" },
     { icon: "🏆", label: "Grupos & Chaveamento", screen: "groups" },
     { icon: "📊", label: "Resultados", screen: "results" },
@@ -778,6 +917,71 @@ function PasswordInput({ value, onChange, onEnter, placeholder, hasError }) {
       >
         {show ? "🙈" : "👁️"}
       </button>
+    </div>
+  );
+}
+
+// ─── AUTOCOMPLETE DE JOGADORES (Artilheiro/Garçom) ─────────────────────────────
+// Sugere nomes a partir dos jogadores que já marcaram gol na Copa, buscados da
+// mesma fonte pública usada para os jogos. Evita erros de digitação/grafia que
+// fariam o sistema não reconhecer um acerto válido.
+function PlayerAutocomplete({ value, onChange, placeholder, disabled }) {
+  const [options, setOptions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchPlayerNames()
+      .then(names => { if (!cancelled) setOptions(names); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const filtered = value.trim()
+    ? options.filter(n => n.toLowerCase().includes(value.trim().toLowerCase())).slice(0, 8)
+    : options.slice(0, 8);
+
+  return (
+    <div ref={wrapperRef} style={{ position: "relative", marginBottom: 14 }}>
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        disabled={disabled}
+        style={{ ...styles.input, marginBottom: 0, opacity: disabled ? 0.6 : 1 }}
+        placeholder={loading ? "Carregando jogadores..." : placeholder}
+        autoComplete="off"
+      />
+      {open && !disabled && filtered.length > 0 && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#16263d", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, maxHeight: 220, overflowY: "auto", zIndex: 50, boxShadow: "0 12px 30px rgba(0,0,0,0.5)" }}>
+          {filtered.map(name => (
+            <button
+              key={name}
+              onClick={() => { onChange(name); setOpen(false); }}
+              style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)", color: "#e0e0e0", fontSize: 13, padding: "10px 12px", cursor: "pointer" }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+      {!loading && options.length === 0 && (
+        <p style={{ color: "#546e7a", fontSize: 11, marginTop: -10, marginBottom: 10 }}>
+          Ainda não há jogadores com gol registrado — digite o nome manualmente.
+        </p>
+      )}
     </div>
   );
 }
@@ -1104,6 +1308,7 @@ function HomeScreen({ currentUser, ranking, setScreen, logout, matches, setActiv
       <div style={styles.cardGrid}>
         {[
           { icon: "⚽", label: "Meus Palpites", color: "#00bcd4", screen: "predictions" },
+          { icon: "🥇", label: "Artilheiro & Garçom", color: "#ffd600", screen: "awards" },
           { icon: "🏅", label: "Classificação",  color: "#ff9800", screen: "ranking" },
           { icon: "📊", label: "Resultados",      color: "#4caf50", screen: "results" },
           { icon: "🏆", label: "Grupos",          color: "#ab47bc", screen: "groups" },
@@ -1186,6 +1391,112 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
 }
 
 // ─── PREDICTIONS ──────────────────────────────────────────────────────────────
+// ─── ARTILHEIRO E GARÇOM DA COPA ───────────────────────────────────────────────
+function AwardsScreen({ currentUser, matches, awardPicks, officialAwards, users, handleSaveAwardPick, setScreen }) {
+  const myPicks = awardPicks[currentUser.id] || {};
+  const locked = areAwardPicksLocked(matches);
+  const [topScorer, setTopScorer] = useState(myPicks.topScorer || "");
+  const [topAssist, setTopAssist] = useState(myPicks.topAssist || "");
+  const [savedAlert, setSavedAlert] = useState(false);
+
+  const hasChanges = topScorer.trim() !== (myPicks.topScorer || "") || topAssist.trim() !== (myPicks.topAssist || "");
+
+  const handleSave = async () => {
+    await handleSaveAwardPick(currentUser.id, { topScorer: topScorer.trim(), topAssist: topAssist.trim() });
+    setSavedAlert(true);
+    setTimeout(() => setSavedAlert(false), 3000);
+  };
+
+  return (
+    <div className="app-page" style={styles.page}>
+      <TopBar title="🥇 Artilheiro & Garçom" onBack={() => setScreen("home")} />
+
+      <div style={{ padding: "16px 16px 0" }}>
+        <div style={styles.multBadge}>
+          <strong style={{ color: "#ffd600" }}>+{AWARD_BONUS_POINTS} pontos</strong>
+          <span style={{ marginLeft: 6, color: "#78909c" }}>para cada acerto • escolha só 1 de cada</span>
+        </div>
+
+        {locked ? (
+          <div style={{ background: "rgba(239,83,80,0.08)", border: "1px solid rgba(239,83,80,0.25)", borderRadius: 10, padding: "10px 14px", marginTop: 12, fontSize: 12, color: "#ef5350" }}>
+            🔒 As escolhas foram encerradas — a Segunda Fase já terminou.
+          </div>
+        ) : (
+          <div style={{ background: "rgba(255,152,0,0.08)", border: "1px solid rgba(255,152,0,0.25)", borderRadius: 10, padding: "10px 14px", marginTop: 12, fontSize: 12, color: "#ff9800" }}>
+            ⏰ Você pode alterar até o fim da Segunda Fase.
+          </div>
+        )}
+      </div>
+
+      {!locked && (
+        <div style={{ padding: "16px" }}>
+          <label style={styles.label}>⚽ Artilheiro da Copa (mais gols)</label>
+          <PlayerAutocomplete
+            value={topScorer}
+            onChange={v => setTopScorer(v)}
+            placeholder="Digite o nome do jogador"
+          />
+
+          <label style={styles.label}>🎯 Garçom da Copa (mais assistências)</label>
+          <PlayerAutocomplete
+            value={topAssist}
+            onChange={v => setTopAssist(v)}
+            placeholder="Digite o nome do jogador"
+          />
+
+          <button onClick={handleSave} disabled={!hasChanges} style={{ ...styles.btn, ...styles.btnFull, marginTop: 8, opacity: hasChanges ? 1 : 0.5 }}>
+            💾 Salvar Escolhas
+          </button>
+          {savedAlert && <p style={{ color: "#4caf50", textAlign: "center", fontSize: 13, marginTop: 10 }}>✅ Escolhas salvas!</p>}
+        </div>
+      )}
+
+      {locked && (
+        <div style={{ padding: "0 16px 32px" }}>
+          <p style={{ color: "#546e7a", fontSize: 11, marginBottom: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Palpites de todos os participantes
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {users.map(u => {
+              const picks = awardPicks[u.id] || {};
+              const hasAny = picks.topScorer || picks.topAssist;
+              const scorerHit = officialAwards.topScorer && picks.topScorer === officialAwards.topScorer;
+              const assistHit = officialAwards.topAssist && picks.topAssist === officialAwards.topAssist;
+              return (
+                <div
+                  key={u.id}
+                  style={{
+                    background: u.id === currentUser.id ? "rgba(255,214,0,0.06)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${u.id === currentUser.id ? "rgba(255,214,0,0.25)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: 10, padding: "10px 12px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <Avatar name={u.displayName} size={26} photoUrl={u.photoUrl} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#e0e0e0" }}>{u.displayName}{u.id === currentUser.id ? " (você)" : ""}</span>
+                  </div>
+                  {hasAny ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 4 }}>
+                      <span style={{ fontSize: 12, color: scorerHit ? "#4caf50" : "#cfd8dc" }}>
+                        ⚽ {picks.topScorer || "—"} {scorerHit && <strong>✓ +{AWARD_BONUS_POINTS}pts</strong>}
+                      </span>
+                      <span style={{ fontSize: 12, color: assistHit ? "#4caf50" : "#cfd8dc" }}>
+                        🎯 {picks.topAssist || "—"} {assistHit && <strong>✓ +{AWARD_BONUS_POINTS}pts</strong>}
+                      </span>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "#37474f", fontStyle: "italic", paddingLeft: 4 }}>sem palpite</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PredictionsScreen({ currentUser, users, matches, phases, activePhase, setActivePhase, tempPredictions, setTempPredictions, predictions, handleSavePredictions, savedAlert, setScreen }) {
   const mult = PHASE_MULTIPLIERS[activePhase] || 1;
   const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
@@ -1637,6 +1948,49 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
   );
 }
 
+// ─── PAINEL ADMIN: VENCEDORES OFICIAIS (ARTILHEIRO/GARÇOM) ────────────────────
+function OfficialAwardsPanel({ officialAwards, setOfficialAwards, matches, addToast }) {
+  const [topScorer, setTopScorer] = useState(officialAwards.topScorer || "");
+  const [topAssist, setTopAssist] = useState(officialAwards.topAssist || "");
+  const picksLocked = areAwardPicksLocked(matches);
+  const cupFinished = isCupFinished(matches);
+
+  const hasChanges = topScorer.trim() !== (officialAwards.topScorer || "") || topAssist.trim() !== (officialAwards.topAssist || "");
+
+  const handleSave = () => {
+    setOfficialAwards({ topScorer: topScorer.trim(), topAssist: topAssist.trim() });
+    addToast?.("✅ Vencedores oficiais atualizados! Pontos aplicados a todos os jogadores.", "success");
+  };
+
+  return (
+    <div style={styles.infoCard2}>
+      <strong style={{ color: "#e0e0e0", fontSize: 14 }}>🥇 Artilheiro & Garçom da Copa</strong>
+      <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
+        Defina os vencedores reais. Quem escolheu certo recebe +{AWARD_BONUS_POINTS} pontos por categoria automaticamente.
+        {!picksLocked && <span style={{ color: "#ff9800" }}> As escolhas dos jogadores ainda estão abertas (fecham no fim da Segunda Fase).</span>}
+      </p>
+
+      {!cupFinished ? (
+        <div style={{ background: "rgba(239,83,80,0.08)", border: "1px solid rgba(239,83,80,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#ef5350" }}>
+          🔒 Disponível somente depois que a Final acontecer e tiver o placar registrado.
+        </div>
+      ) : (
+        <>
+          <label style={styles.label}>⚽ Artilheiro real da Copa</label>
+          <PlayerAutocomplete value={topScorer} onChange={setTopScorer} placeholder="Digite o nome do jogador" />
+
+          <label style={styles.label}>🎯 Garçom real da Copa</label>
+          <PlayerAutocomplete value={topAssist} onChange={setTopAssist} placeholder="Digite o nome do jogador" />
+
+          <button onClick={handleSave} disabled={!hasChanges} style={{ ...styles.btn, ...styles.btnFull, opacity: hasChanges ? 1 : 0.5 }}>
+            💾 Salvar Vencedores
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── SCORE UPDATES PANEL ───────────────────────────────────────────────────────
 // Lets the admin check the public fixtures source for newly finished matches
 // and apply only the score changes, without touching anything entered manually.
@@ -1682,9 +2036,26 @@ function ScoreUpdatesPanel({ checkingUpdates, checkError, scoreUpdates, handleCh
 }
 
 // ─── BACKUP PANEL ─────────────────────────────────────────────────────────────
-function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, setPredictions, addToast }) {
+function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAwards, setUsers, setMatches, setPredictions, setAwardPicks, setOfficialAwards, addToast }) {
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
+  const [backupList, setBackupList] = useState(null);
+  const [loadingList, setLoadingList] = useState(false);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
+  const [restoringKey, setRestoringKey] = useState(null);
+
+  const loadBackupList = async () => {
+    setLoadingList(true);
+    try {
+      const idxRes = await storage.get(BACKUP_INDEX_KEY);
+      setBackupList(idxRes ? JSON.parse(idxRes.value) : []);
+    } catch {
+      setBackupList([]);
+    }
+    setLoadingList(false);
+  };
+
+  useEffect(() => { loadBackupList(); }, []);
 
   const handleExport = () => {
     const backup = {
@@ -1692,6 +2063,8 @@ function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, set
       users: allUsers.filter(u => !u.isAdmin),
       matches,
       predictions,
+      awardPicks,
+      officialAwards,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1719,6 +2092,8 @@ function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, set
         setUsers(merged);
         setMatches(data.matches);
         setPredictions(data.predictions);
+        setAwardPicks(data.awardPicks || {});
+        setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
         addToast(`✅ Backup restaurado! (${data.users.length} jogadores, ${data.matches.length} jogos)`, "success");
       } catch {
         addToast("❌ Arquivo de backup inválido.", "warning");
@@ -1729,21 +2104,100 @@ function BackupPanel({ allUsers, matches, predictions, setUsers, setMatches, set
     reader.readAsText(file);
   };
 
+  // Salva um snapshot manual no próprio Supabase, listado junto com os automáticos.
+  const handleSaveSnapshot = async () => {
+    setSavingSnapshot(true);
+    try {
+      const createdAt = new Date().toISOString();
+      const snapshot = { createdAt, auto: false, users: allUsers.filter(u => !u.isAdmin), matches, predictions, awardPicks, officialAwards };
+      const key = `bolao:backup:${createdAt}`;
+      await storage.set(key, JSON.stringify(snapshot));
+      const idxRes = await storage.get(BACKUP_INDEX_KEY);
+      const index = idxRes ? JSON.parse(idxRes.value) : [];
+      const newEntry = { key, createdAt, auto: false, users: snapshot.users.length, matches: snapshot.matches.length };
+      const updated = [newEntry, ...index].slice(0, 30);
+      await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updated));
+      setBackupList(updated);
+      addToast("💾 Snapshot salvo na nuvem!", "success");
+    } catch {
+      addToast("❌ Não foi possível salvar o snapshot agora.", "warning");
+    }
+    setSavingSnapshot(false);
+  };
+
+  const handleRestoreSnapshot = async (entry) => {
+    if (!window.confirm(`Restaurar o backup de ${formatBackupDate(entry.createdAt)}? Isso substitui os dados atuais (usuários, jogos e palpites).`)) return;
+    setRestoringKey(entry.key);
+    try {
+      const res = await storage.get(entry.key);
+      if (!res) throw new Error("not found");
+      const data = JSON.parse(res.value);
+      const merged = [ADMIN_USER, ...data.users.filter(u => !u.isAdmin)];
+      setUsers(merged);
+      setMatches(data.matches);
+      setAwardPicks(data.awardPicks || {});
+      setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
+      setPredictions(data.predictions);
+      addToast(`✅ Backup de ${formatBackupDate(entry.createdAt)} restaurado!`, "success");
+    } catch {
+      addToast("❌ Não foi possível restaurar esse backup.", "warning");
+    }
+    setRestoringKey(null);
+  };
+
   return (
     <div style={styles.infoCard2}>
       <strong style={{ color: "#e0e0e0", fontSize: 14 }}>💾 Backup dos Dados</strong>
       <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
-        Exporte regularmente para evitar perda de dados. O plano gratuito do banco não tem backup automático.
+        Um backup automático é salvo na nuvem todo dia. Você também pode salvar manualmente ou baixar um arquivo.
       </p>
-      <div style={{ display: "flex", gap: 8 }}>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <button onClick={handleSaveSnapshot} disabled={savingSnapshot} style={{ flex: 1, background: savingSnapshot ? "#37474f" : "linear-gradient(90deg,#7e57c2,#5e35b1)", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}>
+          {savingSnapshot ? "Salvando..." : "☁️ Salvar Snapshot Agora"}
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         <button onClick={handleExport} style={{ flex: 1, background: "linear-gradient(90deg,#00bcd4,#0097a7)", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}>
-          ⬇️ Exportar Backup
+          ⬇️ Exportar Arquivo
         </button>
         <button onClick={() => fileInputRef.current?.click()} disabled={importing} style={{ flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#e0e0e0", fontWeight: 700, fontSize: 12, padding: "9px", cursor: "pointer" }}>
-          {importing ? "Importando..." : "⬆️ Importar Backup"}
+          {importing ? "Importando..." : "⬆️ Importar Arquivo"}
         </button>
         <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
       </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <p style={{ color: "#546e7a", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, margin: 0 }}>Backups na nuvem</p>
+        <button onClick={loadBackupList} disabled={loadingList} style={{ background: "none", border: "none", color: "#00bcd4", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+          {loadingList ? "Atualizando..." : "🔄 Atualizar lista"}
+        </button>
+      </div>
+
+      {backupList === null && <p style={{ color: "#546e7a", fontSize: 12, textAlign: "center", padding: "8px 0" }}>Carregando...</p>}
+      {backupList && backupList.length === 0 && <p style={{ color: "#546e7a", fontSize: 12, textAlign: "center", padding: "8px 0" }}>Nenhum backup salvo ainda.</p>}
+
+      {backupList && backupList.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+          {backupList.map(entry => (
+            <div key={entry.key} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 10px" }}>
+              <span style={{ fontSize: 16 }}>{entry.auto ? "🤖" : "👤"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0" }}>{formatBackupDate(entry.createdAt)}</div>
+                <div style={{ fontSize: 10, color: "#78909c" }}>{entry.auto ? "Automático" : "Manual"} • {entry.users} jogadores • {entry.matches} jogos</div>
+              </div>
+              <button
+                onClick={() => handleRestoreSnapshot(entry)}
+                disabled={restoringKey === entry.key}
+                style={{ background: "rgba(255,214,0,0.12)", border: "1px solid rgba(255,214,0,0.3)", borderRadius: 8, color: "#ffd600", fontSize: 11, fontWeight: 700, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                {restoringKey === entry.key ? "Restaurando..." : "↩️ Restaurar"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1814,7 +2268,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ matches, setMatches, predictions, setPredictions, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
+function AdminScreen({ matches, setMatches, predictions, setPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
@@ -1878,7 +2332,9 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, adminSc
           applyScoreUpdates={applyScoreUpdates}
         />
 
-        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} addToast={addToast} />
+        <OfficialAwardsPanel officialAwards={officialAwards} setOfficialAwards={setOfficialAwards} matches={matches} addToast={addToast} />
+
+        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} awardPicks={awardPicks} officialAwards={officialAwards} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} setAwardPicks={setAwardPicks} setOfficialAwards={setOfficialAwards} addToast={addToast} />
 
         <AdminUsersPanel allNonAdminUsers={allNonAdminUsers} setUsers={setUsers} addToast={addToast} />
 
