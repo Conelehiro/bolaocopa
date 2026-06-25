@@ -977,11 +977,9 @@ function PlayerAutocomplete({ value, onChange, placeholder, disabled }) {
           ))}
         </div>
       )}
-      {!loading && options.length === 0 && (
-        <p style={{ color: "#546e7a", fontSize: 11, marginTop: -10, marginBottom: 10 }}>
-          Ainda não há jogadores com gol registrado — digite o nome manualmente.
-        </p>
-      )}
+      <p style={{ color: "#546e7a", fontSize: 11, marginTop: -10, marginBottom: 10 }}>
+        💡 As sugestões são só dos artilheiros já confirmados — pode digitar qualquer nome (ex: quem deu assistência).
+      </p>
     </div>
   );
 }
