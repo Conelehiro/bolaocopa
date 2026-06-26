@@ -1038,9 +1038,6 @@ function PlayerAutocomplete({ value, onChange, placeholder, disabled }) {
           </div>
         )}
       </div>
-      <p style={{ color: "#546e7a", fontSize: 11, margin: "6px 0 0" }}>
-        💡 Busque por jogador ou seleção — todos os convocados estão na lista. A sugestão já vem com nome + seleção.
-      </p>
     </div>
   );
 }
