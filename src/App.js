@@ -179,6 +179,10 @@ const FLAGS = {
   "Argentina": "🇦🇷", "Algeria": "🇩🇿", "Austria": "🇦🇹", "Jordan": "🇯🇴", "Portugal": "🇵🇹",
   "Uzbekistan": "🇺🇿", "Colombia": "🇨🇴", "England": "🏴", "Croatia": "🇭🇷",
   "Ghana": "🇬🇭", "Panama": "🇵🇦",
+  // grafias usadas na planilha de elencos (SquadLists)
+  "Bosnia and Herzegovina": "🇧🇦", "Cabo Verde": "🇨🇻", "Congo DR": "🇨🇩",
+  "Cote d'Ivoire": "🇨🇮", "Curacao": "🇨🇼", "Czechia": "🇨🇿", "IR Iran": "🇮🇷",
+  "Iraq": "🇮🇶", "Korea Republic": "🇰🇷", "Sweden": "🇸🇪", "Turkiye": "🇹🇷",
 };
 
 // ─── NOMES DOS PAÍSES EM PORTUGUÊS (BR) ───────────────────────────────────────
@@ -203,6 +207,11 @@ const NAMES_PT = {
   "Nigeria": "Nigéria", "Cameroon": "Camarões", "Peru": "Peru", "Chile": "Chile",
   "Costa Rica": "Costa Rica", "Wales": "País de Gales", "Ukraine": "Ucrânia",
   "Russia": "Rússia", "China": "China", "India": "Índia", "Israel": "Israel",
+  // grafias usadas na planilha de elencos (SquadLists)
+  "Bosnia and Herzegovina": "Bósnia e Herzegovina", "Cabo Verde": "Cabo Verde",
+  "Congo DR": "Rep. Dem. do Congo", "Cote d'Ivoire": "Costa do Marfim",
+  "Curacao": "Curaçao", "Czechia": "República Tcheca", "Iraq": "Iraque",
+  "Turkiye": "Turquia",
 };
 
 function flagify(team) {
@@ -211,6 +220,73 @@ function flagify(team) {
   const name = NAMES_PT[team] || team;
   return flag ? `${flag} ${name}` : `🏆 ${name}`;
 }
+
+// ─── ELENCOS DA COPA (planilha SquadLists) ────────────────────────────────────
+// Lista completa de atletas convocados por seleção. Usada no autocomplete de
+// Artilheiro/Garçom: agora o jogador e a seleção são cadastrados aqui no sistema,
+// em vez de buscados de uma API externa.
+const SQUADS = {
+  "Algeria": ["Mastil Melvin", "Mandi Aissa", "Abada Achref", "Tougai Mohamed Amine", "Belaid Zineddine", "Zerrouki Ramiz", "Mahrez Riyad", "Aouar Houssem", "Gouiri Amine", "Chaibi Fares", "Hadj Moussa Anis", "Benbouali Nadhir", "Hadjam Jaouen", "Boudaoui Hicham", "Ait-Nouri Rayan", "Benbot Oussama", "Belghali Rak", "Amoura Mohamed", "Bentaleb Nabil", "Boulbina Adil", "Bensebaini Ramy", "Maza Ibrahim", "Zidane Luca", "Titraoui Yassine", "Ghedjemis Fares", "Chergui Samir"],
+  "Argentina": ["Musso Juan", "Senesi Marcos", "Tagliafico Nicolas", "Montiel Gonzalo", "Paredes Leandro", "Martinez Lisandro", "De Paul Rodrigo", "Barco Valentin", "Alvarez Julian", "Messi Lionel", "Lo Celso Giovani", "Rulli Geronimo", "Romero Cristian", "Palacios Exequiel", "Gonzalez Nico", "Almada Thiago", "Simeone Giuliano", "Paz Nico", "Otamendi Nicolas", "Mac Allister Alexis", "Lopez Jose Manuel", "Martinez Lautaro", "Martinez Emiliano", "Fernandez Enzo", "Medina Facundo", "Molina Nahuel"],
+  "Australia": ["Ryan Mathew", "Degenek Milos", "Circati Alessandro", "Italiano Jacob", "Bos Jordan", "Geria Jason", "Leckie Mathew", "Metcalfe Connor", "Toure Mohamed", "Hrustic Ajdin", "Mabil Awer", "Izzo Paul", "Oneill Aiden", "Devlin Cameron", "Trewin Kai", "Behich Aziz", "Irankunda Nestory", "Beach Patrick", "Souttar Harry", "Volpato Cristian", "Burgess Cameron", "Irvine Jackson", "Velupillay Nishan", "Okon-Engstler Paul", "Herrington Lucas", "Yengi Tete"],
+  "Austria": ["Schlager Alexander", "Affengruber David", "Danso Kevin", "Schlager Xaver", "Posch Stefan", "Seiwald Nicolas", "Arnautovic Marko", "Alaba David", "Sabitzer Marcel", "Grillitsch Florian", "Gregoritsch Michael", "Wiegele Florian", "Pentz Patrick", "Kalajdzic Sasa", "Lienhart Philipp", "Mwene Phillip", "Chukwuemeka Carney", "Schmid Romano", "Ljubicic Dejan", "Laimer Konrad", "Wimmer Patrick", "Prass Alexander", "Friedl Marco", "Wanner Paul", "Svoboda Michael", "Schoepf Alessandro"],
+  "Belgium": ["Courtois Thibaut", "Debast Zeno", "Theate Arthur", "Mechele Brandon", "De Cuyper Maxim", "Witsel Axel", "De Bruyne Kevin", "Tielemans Youri", "Lukaku Romelu", "Trossard Leandro", "Doku Jeremy", "Lammens Senne", "Penders Mike", "Lukebakio Dodi", "Meunier Thomas", "De Winter Koni", "De Ketelaere Charles", "Seys Joaquin", "Moreira Diego", "Vanaken Hans", "Castagne Timothy", "Saelemaekers Alexis", "Raskin Nicolas", "Onana Amadou", "Ngoy Nathan", "Fernandez-Pardo Matias"],
+  "Bosnia and Herzegovina": ["Vasilj Nikola", "Mujakic Nihad", "Hadzikadunic Dennis", "Muharemovic Tarik", "Kolasinac Sead", "Tahirovic Benjamin", "Dedic Amar", "Gigovic Armin", "Bazdar Samed", "Demirovic Ermedin", "Dzeko Edin", "Jurkas Mladen", "Basic Ivan", "Sunjic Ivan", "Memic Amar", "Hadziahmetovic Amir", "Burnic Dzenis", "Katic Nikola", "Alajbegovic Kerim", "Bajraktarevic Esmir", "Radeljic Stjepan", "Zlomislic Martin", "Tabakovic Haris", "Malic Arjan", "Lukic Jovo", "Mahmic Ermin"],
+  "Brazil": ["Alisson", "Ederson Silva", "Gabriel Magalhaes", "Marquinhos", "Casemiro", "Alex Sandro", "Vinicius Junior", "Bruno Guimaraes", "Matheus Cunha", "Neymar Jr", "Raphinha", "Weverton", "Danilo", "Bremer", "Leo Pereira", "Douglas Santos", "Fabinho", "Danilo Santos", "Endrick", "Lucas Paqueta", "Luiz Henrique", "Gabriel Martinelli", "Ederson", "Roger Ibanez", "Igor Thiago", "Rayan"],
+  "Cabo Verde": ["Vozinha", "Stopira", "Diney Borges", "Pico Lopes", "Logan Costa", "Kevin Pina", "Jovane Cabral", "Joao Paulo", "Gilson Benchimol", "Jamiro Monteiro", "Garry Rodrigues", "Marcio Rosa", "Sidny Lopes Cabral", "Deroy Duarte", "Laros Duarte", "Yannick Semedo", "Willy Semedo", "Telmo Arcanjo", "Dailon Livramento", "Ryan Mendes", "Nuno Da Costa", "Steven Moreira", "Cj Dos Santos", "Wagner Pina", "Kelvin Pires", "Helio Varela"],
+  "Canada": ["St. Clair Dayne", "Johnston Alistair", "Jones Ale", "De Fougerolles Luc", "Waterman Joel", "Choiniere Mathieu", "Eustaquio Stephen", "Kone Ismael", "Larin Cyle", "David Jonathan", "Millar Liam", "Oluwaseyi Tani", "Cornelius Derek", "Shaffelburg Jacob", "Bombito Moise", "Crepeau Maxime", "Buchanan Tajon", "Goodman Owen", "Davies Alphonso", "Ahmed Ali", "Osorio Jonathan", "Laryea Richie", "Sigur Niko", "David Promise", "Saliba Nathan", "Nelson Jayden"],
+  "Colombia": ["Ospina David", "Munoz Daniel", "Lucumi Jhon", "Arias Santiago", "Castano Kevin", "Rios Richard", "Diaz Luis", "Carrascal Jorge", "Cordoba Jhon", "Rodriguez James", "Arias Jhon", "Vargas Camilo", "Mina Yerry", "Puerta Gustavo", "Portilla Juan", "Lerma Jefferson", "Mojica Johan", "Ditta Willer", "Hernandez Cucho", "Quintero Juan", "Campaz Jaminton", "Machado Deiver", "Sanchez Davinson", "Montero Alvaro", "Suarez Luis", "Gomez Andres"],
+  "Congo DR": ["Mpasi Lionel", "Wan-Bissaka Aaron", "Kapuadi Steve", "Tuanzebe Axel", "Batubinsika Dylan", "Mukau Ngalayel", "Mbuku Nathanael", "Moutoussamy Samuel", "Cipenga Brian", "Bongonda Theo", "Kakuta Gael", "Kayembe Joris", "Elia Meschack", "Sadiki Noah", "Tshibola Aaron", "Fayulu Timothy", "Bakambu Cedric", "Pickel Charles", "Mayele Fiston", "Wissa Yoane", "Epolo Matthieu", "Mbemba Chancel", "Banza Simon", "Kalulu Gedeon", "Kayembe Edo", "Masuaku Arthur"],
+  "Cote d'Ivoire": ["Fofana Yahia", "Diomande Ousmane", "Konan Ghislain", "Seri Jean Michael", "Singo Wilfried", "Fofana Seko", "Kossounou Odilon", "Kessie Franck", "Bonny Ange-Yoan", "Adingra Simon", "Diomande Yan", "Wahi Elye", "Operi Christopher", "Diakite Oumar", "Diallo Amad", "Kone Mohamed", "Doue Guela", "Sangare Ibrahim", "Pepe Nicolas", "Agbadou Emmanuel", "Ndicka Evan", "Guessand Evann", "Lafont Alban", "Toure Bazoumana", "Guiagon Parfait", "Oulai Christ Inao"],
+  "Croatia": ["Livakovic Dominik", "Stanisic Josip", "Pongracic Marin", "Gvardiol Josko", "Caleta-Car Duje", "Sutalo Josip", "Moro Nikola", "Kovacic Mateo", "Kramaric Andrej", "Modric Luka", "Budimir Ante", "Pandur Ivor", "Vlasic Nikola", "Perisic Ivan", "Pasalic Mario", "Baturina Martin", "Sucic Petar", "Jakic Kristijan", "Fruk Toni", "Matanovic Igor", "Sucic Luka", "Vuskovic Luka", "Kotarski Dominik", "Pasalic Marco", "Erlic Martin", "Musa Petar"],
+  "Curacao": ["Room Eloy", "Sambo Shurandy", "Gaari Jurien", "Van Eijma Roshon", "Floranus Sherel", "Roemeratoe Godfried", "Bacuna Juninho", "Comenencia Livano", "Locadia Juergen", "Bacuna Leandro", "Antonisse Jeremy", "Hansen Sontje", "Noslin Tyrese", "Gorre Kenji", "Martha Arjany", "Margaritha Jearl", "Kuwas Brandley", "Obispo Armando", "Kastaneer Gervane", "Brenet Joshua", "Chong Tahith", "Felida Kevin", "Bazoer Riechedly", "Fonville Deveron", "Bodak Tyrick", "Doornbusch Trevor"],
+  "Czechia": ["Kovar Matej", "Zima David", "Holes Tomas", "Hranac Robin", "Coufal Vladimir", "Chaloupek Stepan", "Krejci Ladislav", "Darida Vladimir", "Hlozek Adam", "Schick Patrik", "Kuchta Jan", "Cerv Lukas", "Chytil Mojmir", "Jurasek David", "Sulc Pavel", "Stanek Jindrich", "Provod Lukas", "Sadilek Michal", "Chory Tomas", "Zeleny Jaroslav", "Doudera David", "Soucek Tomas", "Hornicek Lukas", "Sojka Alexandr", "Sochurek Hugo", "Visinsky Denis"],
+  "Ecuador": ["Galindez Hernan", "Torres Felix", "Hincapie Piero", "Ordonez Joel", "Alcivar Jordy", "Pacho Willian", "Estupinan Pervis", "Valencia Anthony", "Yeboah John", "Paez Kendry", "Rodriguez Kevin", "Ramirez Moises", "Valencia Enner", "Minda Alan", "Vite Pedro", "Caicedo Jordy", "Preciado Angelo", "Castillo Denil", "Plata Gonzalo", "Angulo Nilson", "Franco Alan", "Valle Gonzalo", "Caicedo Moises", "Arevalo Jeremy", "Porozo Jackson", "Medina Yaimar"],
+  "Egypt": ["Mohamed Elshenawy", "Yasser Ibrahim", "Mohamed Hany", "Hossam Abdelmaguid", "Ramy Rabia", "Mohamed Abdelmoneim", "Trezeguet", "Emam Ashour", "Hamza Abdelkarim", "Mohamed Salah", "Mostafa Zico", "Haissem Hassan", "Ahmed Fatouh", "Hamdy Fathy", "Karim Hafez", "Mahdy Soliman", "Mohanad Lashin", "Nabil Donga", "Marawan Attia", "Ibrahim Adel", "Mahmoud Saber", "Omar Marmoush", "Mostafa Shoubir", "Tarek Alaa", "Zizo", "Mohamed Alaa"],
+  "England": ["Pickford Jordan", "Konsa Ezri", "Oreilly Nico", "Rice Declan", "Stones John", "Guehi Marc", "Saka Bukayo", "Anderson Elliot", "Kane Harry", "Bellingham Jude", "Rashford Marcus", "Chalobah Trevoh", "Henderson Dean", "Henderson Jordan", "Burn Dan", "Mainoo Kobbie", "Rogers Morgan", "Gordon Anthony", "Watkins Ollie", "Madueke Noni", "Eze Eberechi", "Toney Ivan", "Trafford James", "James Reece", "Spence Djed", "Quansah Jarell"],
+  "France": ["Samba Brice", "Gusto Malo", "Digne Lucas", "Upamecano Dayot", "Kounde Jules", "Kone Manu", "Dembele Ousmane", "Tchouameni Aurelien", "Thuram Marcus", "Mbappe Kylian", "Olise Michael", "Barcola Bradley", "Kante Ngolo", "Rabiot Adrien", "Konate Ibrahima", "Maignan Mike", "Saliba William", "Zaire-Emery Warren", "Hernandez Theo", "Doue Desire", "Hernandez Lucas", "Mateta Jean-Philippe", "Risser Robin", "Cherki Rayan", "Akliouche Maghnes", "Lacroix Maxence"],
+  "Germany": ["Neuer Manuel", "Ruediger Antonio", "Anton Waldemar", "Tah Jonathan", "Pavlovic Aleksandar", "Kimmich Joshua", "Havertz Kai", "Goretzka Leon", "Leweling Jamie", "Musiala Jamal", "Woltemade Nick", "Baumann Oliver", "Gross Pascal", "Beier Maximilian", "Schlotterbeck Nico", "Stiller Angelo", "Wirtz Florian", "Brown Nathaniel", "Sane Leroy", "Amiri Nadiem", "Nuebel Alexander", "Raum David", "Nmecha Felix", "Thiaw Malick", "Ouedraogo Assan", "Undav Deniz"],
+  "Ghana": ["Zigi Lawrence Ati", "Seidu Alidu", "Yirenkyi Caleb", "Adjetey Jonas", "Partey Thomas", "Mumin Abdul", "Fatawu Abdul", "Sibo Kwasi", "Ayew Jordan", "Thomas-Asante Brandon", "Semenyo Antoine", "Anang Joseph", "Bonsu Baah Christopher", "Mensah Gideon", "Owusu Elisha", "Asare Benjamin", "Rahman Baba", "Opoku Jerome", "Williams Inaki", "Boakye Augustine", "Oppong Kojo Peprah", "Sulemana Kamaldeen", "Luckassen Derrick", "Nuamah Ernest", "Adu Prince", "Senaya Marvin"],
+  "Haiti": ["Placide Johny", "Arcus Carlens", "Thermoncy Keeto", "Ade Ricardo", "Delcroix Hannes", "Sainte Carl", "Etienne Derrick", "Experience Martin", "Nazon Duckens", "Bellegarde Jean-Ricner", "Deedson Louicius", "Pierre Alexandre", "Lacroix Markhus", "Metusala Garven", "Providence Ruben", "Joseph Lenny", "Jean Jacques Danley", "Isidor Wilson", "Fortune Yassin", "Pierrot Frantzdy", "Casimir Josue", "Duverne Jean-Kevin", "Duverger Josue", "Paugain Wilguens", "Simon Dominique", "Pierre Woodensky"],
+  "IR Iran": ["Beiranvand Alireza", "Hardani Saleh", "Hajisafi Ehsan", "Khalilzadeh Shoja", "Mohammadi Milad", "Ezatolahi Saeid", "Jahanbakhsh Alireza", "Mohebbi Mohammad", "Taremi Mehdi", "Ghayedi Mehdi", "Alipour Ali", "Niazmand Payam", "Kanani Hossein", "Ghoddos Saman", "Cheshmi Roozbeh", "Torabi Mehdi", "Yousefi Arya", "Hosseinzadeh Amirhossein", "Nemati Ali", "Moghanloo Shahriyar", "Ghorbani Mohammad", "Hosseini Hossein", "Rezaeian Ramin", "Dargahi Dennis", "Iri Danial", "Razaghinia Amirmohammad"],
+  "Iraq": ["Fahad Talib", "Rebin Sulaka", "Hussein Ali", "Zaid Tahseen", "Akam Hashim", "Munaf Younus", "Youssef Amyn", "Ibrahim Bayesh", "Ali Alhamadi", "Mohanad Ali", "Ahmed Qasem", "Jalal Hassan", "Ali Yousif", "Zidane Iqbal", "Ahmed Maknazi", "Amir Alammari", "Ali Jasim", "Aymen Hussein", "Kevin Yakob", "Aimar Sher", "Marko Farji", "Ahmed Basil", "Merchas Doski", "Zaid Ismael", "Mustafa Saadoon", "Frans Putros"],
+  "Japan": ["Suzuki Zion", "Sugawara Yukinari", "Taniguchi Shogo", "Itakura Kou", "Nagatomo Yuto", "Machino Shuto", "Tanaka Ao", "Kubo Takefusa", "Goto Keisuke", "Doan Ritsu", "Maeda Daizen", "Osako Keisuke", "Nakamura Keito", "Ito Junya", "Kamada Daichi", "Watanabe Tsuyoshi", "Suzuki Yuito", "Ueda Ayase", "Ogawa Koki", "Seko Ayumu", "Ito Hiroki", "Tomiyasu Takehiro", "Hayakawa Tomoki", "Sano Kaishu", "Suzuki Junnosuke", "Shiogai Kento"],
+  "Jordan": ["Yazeed Abulaila", "Mohammad Abuhasheesh", "Abdallah Nasib", "Husam Abudahab", "Yazan Alarab", "Amer Jamous", "Mohammad Abuzraiq", "Noor Alrawabdeh", "Ali Olwan", "Mousa Altamari", "Odeh Fakhoury", "Nour Baniateyah", "Mahmoud Almardi", "Rajaei Ayed", "Ibrahim Sadeh", "Mohammad Abualnadi", "Saleem Obaid", "Mohammad Abughoush", "Saed Alrosan", "Mohannad Abutaha", "Nizar Alrashdan", "Abdallah Alfakhori", "Ehsan Haddad", "Ali Azaizeh", "Mohammad Aldaoud", "Anas Badawi"],
+  "Korea Republic": ["Kim Seunggyu", "Lee Hanbeom", "Lee Gihyuk", "Kim Minjae", "Kim Taehyeon", "Hwang Inbeom", "Son Heungmin", "Paik Seungho", "Cho Guesung", "Lee Jaesung", "Hwang Heechan", "Song Bumkeun", "Lee Taeseok", "Cho Wije", "Kim Moonhwan", "Park Jinseob", "Bae Junho", "Oh Hyeongyu", "Lee Kangin", "Yang Hyunjun", "Jo Hyeonwoo", "Seol Youngwoo", "Castrop Jens", "Kim Jingyu", "Eom Jisung", "Lee Donggyeong"],
+  "Mexico": ["Rangel Raul", "Sanchez Jorge", "Montes Cesar", "Alvarez Edson", "Vasquez Johan", "Lira Erik", "Romo Luis", "Fidalgo Alvaro", "Jimenez Raul", "Vega Alexis", "Gimenez Santiago", "Acevedo Carlos", "Ochoa Guillermo", "Gonzalez Armando", "Reyes Israel", "Quinones Julian", "Pineda Orbelin", "Vargas Obed", "Mora Gilberto", "Chavez Mateo", "Huerta Cesar", "Martinez Guillermo", "Gallardo Jesus", "Chavez Luis", "Alvarado Roberto", "Gutierrez Brian"],
+  "Morocco": ["Bounou Yassine", "Hakimi Achraf", "Mazraoui Noussair", "Amrabat Sofyan", "Saadane Marwane", "Bouaddi Ayyoub", "Talbi Chemsdine", "Ounahi Azzedine", "Rahimi Souane", "Diaz Brahim", "Saibari Ismael", "El Kajoui Munir", "El Ouahdi Zakaria", "Diop Issa", "El Mourabet Samir", "Yassine Gessime", "Sbai Amine", "Riad Chadi", "Belammari Youssef", "El Kaabi Ayoub", "Amaimouni Ayoube", "Tagnaouti Ahmed Reda", "El Khannouss Bilal", "El Aynaoui Neil", "Halhal Redouane", "Salah Eddine Anass"],
+  "Netherlands": ["Verbruggen Bart", "Geertruida Lutsharel", "De Roon Marten", "Van Dijk Virgil", "Ake Nathan", "Van Hecke Jan Paul", "Kluivert Justin", "Gravenberch Ryan", "Weghorst Wout", "Depay Memphis", "Gakpo Cody", "Wieffer Mats", "Roefs Robin", "Reijnders Tijjani", "Van De Ven Micky", "Til Guus", "Lang Noa", "Malen Donyell", "Brobbey Brian", "Koopmeiners Teun", "De Jong Frenkie", "Dumfries Denzel", "Flekken Mark", "Summerville Crysencio", "Hato Jorrel", "Timber Quinten"],
+  "New Zealand": ["Crocombe Max", "Payne Tim", "De Vries Francis", "Bindon Tyler", "Boxall Michael", "Bell Joe", "Rogerson Logan", "Stamenic Marko", "Wood Chris", "Singh Sarpreet", "Just Elijah", "Paulsen Alex", "Cacace Liberato", "Rufer Alex", "Pijnaker Nando", "Surman Finn", "Barbarouses Kosta", "Waine Ben", "Old Ben", "Mccowatt Callum", "Randall Jesse", "Woud Michael", "Thomas Ryan", "Elliot Callan", "Bayliss Lachlan", "Smith Tommy"],
+  "Norway": ["Nyland Orjan", "Thorsby Morten", "Ajer Kristoffer", "Ostigard Leo", "Moller Wolfe David", "Berg Patrick", "Sorloth Alexander", "Berge Sander", "Haaland Erling", "Odegaard Martin", "Strand Larsen Jorgen", "Tangvik Sander", "Selvik Egil", "Aursnes Fredrik", "Bjorkan Fredrik Andre", "Holmgren Pedersen Marcus", "Heggem Torbjorn", "Thorstvedt Kristian", "Aasgaard Thelo", "Nusa Antonio", "Schjelderup Andreas", "Bobb Oscar", "Hauge Jens Petter", "Langas Sondre", "Falchener Henrik", "Ryerson Julian"],
+  "Panama": ["Mejia Luis", "Blackman Cesar", "Cordoba Jose", "Escobar Fidel", "Farina Edgardo", "Martinez Cristian", "Rodriguez Jose Luis", "Carrasquilla Adalberto", "Rodriguez Tomas", "Diaz Ismael", "Barcenas Edgar Yoel", "Samudio Cesar", "Ramos Jiovany", "Harvey Carlos", "Davis Eric", "Andrade Andres", "Fajardo Jose", "Waterman Cecilio", "Quintero Alberto", "Godoy Anibal", "Yanis Cesar", "Mosquera Orlando", "Murillo Amir", "Londono Azarias", "Miller Roderick", "Gutierrez Jorge"],
+  "Paraguay": ["Fernandez Gatito", "Velazquez Gustavo", "Alderete Omar", "Caceres Juan Jose", "Balbuena Fabian", "Alonso Junior", "Sosa Ramon", "Gomez Diego", "Sanabria Antonio", "Almiron Miguel", "Mauricio", "Gill Orlando", "Canale Jose", "Cubas Andres", "Gomez Gustavo", "Bobadilla Damian", "Romero Gamarra Alejandro", "Arce Alex", "Enciso Julio", "Ojeda Braian", "Avalos Gabriel", "Olveira Gaston", "Galarza Matias", "Caballero Gustavo", "Pitta Isidro", "Maidana Alexandro"],
+  "Portugal": ["Diogo Costa", "Nelson Semedo", "Ruben Dias", "Tomas Araujo", "Diogo Dalot", "Matheus Nunes", "Cristiano Ronaldo", "Bruno Fernandes", "Goncalo Ramos", "Bernardo Silva", "Joao Felix", "Jose Sa", "Renato Veiga", "Goncalo Inacio", "Joao Neves", "Francisco Trincao", "Rafael Leao", "Pedro Neto", "Goncalo Guedes", "Joao Cancelo", "Ruben Neves", "Rui Silva", "Vitinha", "Samu Costa", "Nuno Mendes", "Francisco Conceicao"],
+  "Qatar": ["Mahmoud Abunada", "Pedro Miguel", "Lucas Mendes", "Issa Laye", "Jassem Gaber", "Abdulaziz Hatem", "Ahmed Alaaeldin", "Edmilson Junior", "Mohammed Muntari", "Hassan Alhaydos", "Akram Afif", "Karim Boudiaf", "Ayoub Aloui", "Homam Ahmed", "Yusuf Abdurisag", "Boualem Khoukhi", "Ahmed Alganehi", "Sultan Albrake", "Almoez Ali", "Ahmed Fathy", "Salah Zakaria", "Meshaal Barsham", "Assim Madibo", "Tahsin Mohammed", "Alhashmi Alhussein", "Mohamed Manai"],
+  "Saudi Arabia": ["Nawaf Alaqidi", "Ali Majrashi", "Ali Lajami", "Abdulelah Alamri", "Hassan Altambakti", "Nasser Aldawsari", "Musab Aljuwayr", "Aiman Yahya", "Feras Albrikan", "Salem Aldawsari", "Saleh Alshehri", "Saud Abdulhamid", "Nawaf Bu Washl", "Hassan Kadish", "Abdullah Alkhaibari", "Ziyad Aljohani", "Khalid Alghannam", "Ala Alhajji", "Abdullah Alhamddan", "Sultan Mandash", "Mohammed Alowais", "Ahmed Alkassar", "Mohamed Kanno", "Moteb Alharbi", "Jehad Thikri", "Mohammed Abu Alshamat"],
+  "Scotland": ["Gunn Angus", "Hickey Aaron", "Robertson Andy", "Mctominay Scott", "Hanley Grant", "Tierney Kieran", "Mcginn John", "Fletcher Tyler", "Dykes Lyndon", "Adams Che", "Christie Ryan", "Kelly Liam", "Hendry Jack", "Stewart Ross", "Souttar John", "Hyam Dominic", "Gannon-Doak Ben", "Hirst George", "Ferguson Lewis", "Shankland Lawrence", "Gordon Craig", "Patterson Nathan", "Mclean Kenny", "Ralston Anthony", "Curtis Findlay", "Mckenna Scott"],
+  "Senegal": ["Diouf Yehvann", "Sarr Mamadou", "Koulibaly Kalidou", "Seck Abdoulaye", "Gueye Idrissa Gana", "Ciss Pathe", "Diao Assane", "Camara Lamine", "Dieng Bamba", "Mane Sadio", "Jackson Nicolas", "Ndiaye Cherif", "Ndiaye Iliman", "Jakobs Ismail", "Diatta Krepin", "Mendy Edouard", "Sarr Pape Matar", "Sarr Ismaila", "Niakhate Moussa", "Mbaye Ibrahim", "Diarra Habib", "Ndiaye Bara Sapoko", "Diaw Mory", "Mendy Antoine", "Diouf El Hadji Malick", "Gueye Pape"],
+  "South Africa": ["Williams Ronwen", "Matuludi Thabang", "Ndamane Khulumani", "Mokoena Teboho", "Mbatha Thalente", "Modiba Aubrey", "Appollis Oswin", "Moremi Tshepang", "Foster Lyle", "Mofokeng Relebohile", "Zwane Themba", "Maseko Thapelo", "Sithole Sphephelo", "Mbokazi Mbekezeli", "Rayners Iqraam", "Chaine Sipho", "Makgopa Evidence", "Kabini Samukele", "Sibisi Nkosinathi", "Mudau Khuliso", "Okon Ime", "Goss Ricardo", "Adams Jayden", "Makhanya Olwethu", "Sebelebele Kamogelo", "Cross Bradley"],
+  "Spain": ["Raya David", "Pubill Marc", "Grimaldo Alex", "Garcia Eric", "Llorente Marcos", "Merino Mikel", "Torres Ferran", "Ruiz Fabian", "Gavi Pablo", "Olmo Dani", "Pino Yeremy", "Porro Pedro", "Garcia Joan", "Laporte Aymeric", "Baena Alex", "Rodri", "Williams Nico", "Zubimendi Martin", "Yamal Lamine", "Pedri", "Oyarzabal Mikel", "Cubarsi Pau", "Simon Unai", "Cucurella Marc", "Munoz Victor", "Iglesias Borja"],
+  "Sweden": ["Widell Zetterstrom Jacob", "Lagerbielke Gustaf", "Lindelof Victor", "Hien Isak", "Gudmundsson Gabriel", "Johansson Herman", "Bergvall Lucas", "Svensson Daniel", "Isak Alexander", "Nygren Benjamin", "Elanga Anthony", "Johansson Viktor", "Sema Ken", "Ekdal Hjalmar", "Starfelt Carl", "Karlstrom Jesper", "Gyokeres Viktor", "Ayari Yasin", "Svanberg Mattias", "Smith Eric", "Bernhardsson Alexander", "Zeneli Besfort", "Nordfeldt Kristoffer", "Stroud Elliot", "Nilsson Gustaf", "Ali Taha"],
+  "Switzerland": ["Kobel Gregor", "Muheim Miro", "Widmer Silvan", "Elvedi Nico", "Akanji Manuel", "Zakaria Denis", "Embolo Breel", "Freuler Remo", "Manzambi Johan", "Xhaka Granit", "Ndoye Dan", "Mvogo Yvon", "Rodriguez Ricardo", "Jashari Ardon", "Sow Djibril", "Fassnacht Christian", "Vargas Ruben", "Coemert Eray", "Okafor Noah", "Aebischer Michel", "Keller Marvin", "Rieder Fabian", "Amdouni Zeki", "Amenda Aurele", "Jaquez Luca", "Itten Cedric"],
+  "Tunisia": ["Chamakh Mouhib", "Abdi Ali", "Talbi Montassar", "Rekik Omar", "Arous Adam", "Bronn Dylan", "Achouri Elias", "Saad Elias", "Mastouri Hazem", "Mejbri Hannibal", "Gharbi Ismael", "Ben Ouanes Mortadha", "Khedira Rani", "Ayari Khalil", "Hadj Mahmoud Mohamed", "Dahmen Aymen", "Skhiri Ellyes", "Elloumi Rayan", "Chaouat Firas", "Valery Yan", "Ben Hmida Mohamed Amine", "Ben Hessen Sabri", "Neffati Moutaz", "Chikhaoui Raed", "Slimane Anis", "Tounekti Sebastian"],
+  "Turkiye": ["Gunok Mert", "Celik Zeki", "Demiral Merih", "Soyuncu Caglar", "Ozcan Salih", "Kokcu Orkun", "Akturkoglu Kerem", "Guler Arda", "Gul Deniz", "Calhanoglu Hakan", "Yildiz Kenan", "Bayindir Altay", "Elmali Eren", "Bardakci Abdulkerim", "Kabak Ozan", "Yuksek Ismail", "Kahveci Irfan Can", "Muldur Mert", "Akgun Yunus", "Kadioglu Ferdi", "Yilmaz Baris Alper", "Ayhan Kaan", "Cakir Ugurcan", "Aydin Oguz", "Akaydin Samet", "Uzun Can"],
+  "Uruguay": ["Rochet Sergio", "Gimenez Jose Maria", "Caceres Sebastian", "Araujo Ronald", "Ugarte Manuel", "Bentancur Rodrigo", "De La Cruz Nicolas", "Valverde Federico", "Nunez Darwin", "De Arrascaeta Giorgian", "Pellistri Facundo", "Mele Santiago", "Varela Guillermo", "Canobbio Agustin", "Martinez Emiliano", "Olivera Mathias", "Vina Matias", "Rodriguez Brian", "Aguirre Rodrigo", "Araujo Maxi", "Vinas Federico", "Piquerez Joaquin", "Muslera Fernando", "Bueno Santiago", "Sanabria Juan Manuel", "Zalazar Rodrigo"],
+  "USA": ["Turner Matt", "Dest Sergino", "Richards Chris", "Adams Tyler", "Robinson Antonee", "Trusty Auston", "Reyna Giovanni", "Mckennie Weston", "Pepi Ricardo", "Pulisic Christian", "Aaronson Brenden", "Robinson Miles", "Ream Tim", "Berhalter Sebastian", "Roldan Cristian", "Freeman Alex", "Tillman Malik", "Arfsten Max", "Wright Haji", "Balogun Folarin", "Weah Timothy", "Mckenzie Mark", "Scally Joe", "Freese Matt", "Brady Chris", "Zendejas Alex"],
+  "Uzbekistan": ["Yusupov Utkir", "Khusanov Abdukodir", "Alijonov Khojiakbar", "Sayfiev Farrukh", "Ashurmatov Rustam", "Mozgovoy Akmal", "Shukurov Otabek", "Iskanderov Jamshid", "Xamrobekov Odiljon", "Jiyanov Ruslanbek", "Urunov Oston", "Nematov Abduvohid", "Nasrullaev Sherzod", "Shomurodov Eldor", "Eshmurodov Umar", "Ergashev Botirali", "Khamdamov Dostonbek", "Abdullaev Abdulla", "Ganiev Azizjon", "Amonov Azizbek", "Sergeev Igor", "Fayzullaev Abbosbek", "Esanov Sherzod", "Karimov Behruzjon", "Ulmasaliyev Avazbek", "Urozov Jakhongir"],
+};
+
+// Lista plana de jogadores para o autocomplete, já com nome traduzido da seleção
+// e o rótulo concatenado "Atleta — 🏳 Seleção" exibido na busca.
+const WORLD_CUP_PLAYERS = Object.entries(SQUADS).flatMap(([country, players]) =>
+  players.map(name => ({
+    name,
+    country,
+    countryLabel: flagify(country),          // ex.: "🇦🇷 Argentina"
+    label: `${name} — ${flagify(country)}`,  // ex.: "Messi Lionel — 🇦🇷 Argentina"
+  }))
+).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
 
 // ─── ROUND → PHASE MAP ─────────────────────────────────────────────────────────
 function mapRoundToPhase(round) {
@@ -279,29 +355,10 @@ async function fetchMatchesFromAI() {
 }
 
 // ─── NOMES DE JOGADORES PARA AUTOCOMPLETE (Artilheiro/Garçom) ──────────────────
-// Extrai os nomes de quem já marcou gol nos jogos disputados, a partir da mesma
-// fonte pública. Não inclui gols contra (próprio time), já que esses não contam
-// como "artilheiro" de verdade. Resultado é cacheado em memória por alguns
-// minutos para não refazer a chamada toda vez que o campo de busca é aberto.
-let _playerNamesCache = null;
-let _playerNamesCacheAt = 0;
-async function fetchPlayerNames() {
-  const now = Date.now();
-  if (_playerNamesCache && now - _playerNamesCacheAt < 5 * 60 * 1000) return _playerNamesCache;
-  const res = await fetch("https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json");
-  if (!res.ok) throw new Error("Falha ao buscar jogadores");
-  const data = await res.json();
-  const names = new Set();
-  for (const m of data.matches) {
-    for (const g of [...(m.goals1 || []), ...(m.goals2 || [])]) {
-      if (g.name && !g.owngoal) names.add(g.name);
-    }
-  }
-  const sorted = [...names].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  _playerNamesCache = sorted;
-  _playerNamesCacheAt = now;
-  return sorted;
-}
+// Os jogadores e suas seleções agora são cadastrados no próprio sistema, a partir
+// da lista WORLD_CUP_PLAYERS (derivada de SQUADS, acima). Não há mais chamada a
+// API externa: o autocomplete sugere TODOS os atletas convocados, exibindo o
+// nome do atleta concatenado com a seleção (traduzida) — ex.: "Messi Lionel — 🇦🇷 Argentina".
 
 // ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
 // Usa a tabela oficial como base (horários corretos em Brasília + placares reais
@@ -922,24 +979,13 @@ function PasswordInput({ value, onChange, onEnter, placeholder, hasError }) {
 }
 
 // ─── AUTOCOMPLETE DE JOGADORES (Artilheiro/Garçom) ─────────────────────────────
-// Sugere nomes a partir dos jogadores que já marcaram gol na Copa, buscados da
-// mesma fonte pública usada para os jogos. Evita erros de digitação/grafia que
-// fariam o sistema não reconhecer um acerto válido.
+// Sugere TODOS os atletas convocados, a partir da lista WORLD_CUP_PLAYERS cadastrada
+// no próprio sistema (planilha de elencos). Cada sugestão mostra o nome do atleta
+// concatenado com a seleção traduzida — ex.: "Messi Lionel — 🇦🇷 Argentina" — e é
+// esse rótulo que fica salvo como palpite, evitando erros de grafia.
 function PlayerAutocomplete({ value, onChange, placeholder, disabled }) {
-  const [options, setOptions] = useState([]);
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const wrapperRef = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetchPlayerNames()
-      .then(names => { if (!cancelled) setOptions(names); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     const onClickOutside = (e) => {
@@ -949,36 +995,51 @@ function PlayerAutocomplete({ value, onChange, placeholder, disabled }) {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  const filtered = value.trim()
-    ? options.filter(n => n.toLowerCase().includes(value.trim().toLowerCase())).slice(0, 8)
-    : options.slice(0, 8);
+  const q = value.trim().toLowerCase();
+  const filtered = (q
+    ? WORLD_CUP_PLAYERS.filter(p =>
+        p.label.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        p.countryLabel.toLowerCase().includes(q) ||
+        p.country.toLowerCase().includes(q)
+      )
+    : WORLD_CUP_PLAYERS
+  ).slice(0, 10);
 
   return (
-    <div ref={wrapperRef} style={{ position: "relative", marginBottom: 14 }}>
-      <input
-        value={value}
-        onChange={e => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        disabled={disabled}
-        style={{ ...styles.input, marginBottom: 0, opacity: disabled ? 0.6 : 1 }}
-        placeholder={loading ? "Carregando jogadores..." : placeholder}
-        autoComplete="off"
-      />
-      {open && !disabled && filtered.length > 0 && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#16263d", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, maxHeight: 220, overflowY: "auto", zIndex: 50, boxShadow: "0 12px 30px rgba(0,0,0,0.5)" }}>
-          {filtered.map(name => (
-            <button
-              key={name}
-              onClick={() => { onChange(name); setOpen(false); }}
-              style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)", color: "#e0e0e0", fontSize: 13, padding: "10px 12px", cursor: "pointer" }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      )}
-      <p style={{ color: "#546e7a", fontSize: 11, marginTop: -10, marginBottom: 10 }}>
-        💡 As sugestões são só dos artilheiros já confirmados — pode digitar qualquer nome (ex: quem deu assistência).
+    <div style={{ marginBottom: 14 }}>
+      <div ref={wrapperRef} style={{ position: "relative" }}>
+        <input
+          value={value}
+          onChange={e => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          disabled={disabled}
+          style={{ ...styles.input, marginBottom: 0, opacity: disabled ? 0.6 : 1 }}
+          placeholder={placeholder}
+          autoComplete="off"
+        />
+        {open && !disabled && filtered.length > 0 && (
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#16263d", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, maxHeight: 240, overflowY: "auto", zIndex: 50, boxShadow: "0 12px 30px rgba(0,0,0,0.5)" }}>
+            {filtered.map(p => (
+              <button
+                key={p.label}
+                onClick={() => { onChange(p.label); setOpen(false); }}
+                style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.06)", color: "#e0e0e0", fontSize: 13, padding: "10px 12px", cursor: "pointer" }}
+              >
+                <span style={{ fontWeight: 700 }}>{p.name}</span>
+                <span style={{ fontSize: 11, color: "#90a4ae" }}>{p.countryLabel}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {open && !disabled && value.trim() && filtered.length === 0 && (
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#16263d", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, zIndex: 50, padding: "10px 12px", boxShadow: "0 12px 30px rgba(0,0,0,0.5)" }}>
+            <span style={{ color: "#78909c", fontSize: 12 }}>Nenhum atleta encontrado com esse nome — pode salvar do mesmo jeito.</span>
+          </div>
+        )}
+      </div>
+      <p style={{ color: "#546e7a", fontSize: 11, margin: "6px 0 0" }}>
+        💡 Busque por jogador ou seleção — todos os convocados estão na lista. A sugestão já vem com nome + seleção.
       </p>
     </div>
   );
