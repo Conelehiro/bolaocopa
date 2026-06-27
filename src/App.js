@@ -51,6 +51,15 @@ const storage = {
       return { key, value };
     } catch { return null; }
   },
+  async delete(key) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bolao_data?key=eq.${encodeURIComponent(key)}`,
+        { method: "DELETE", headers: SUPABASE_HEADERS }
+      );
+      return res.ok;
+    } catch { return false; }
+  },
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -68,6 +77,15 @@ const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
 const BACKUP_INDEX_KEY = "bolao:backup:index";
 const AWARD_BONUS_POINTS = 150;
+// Pontos extras fixos por cravar o placar dos pênaltis num jogo de mata-mata
+// que terminou empatado. Não é multiplicado pela fase (vale sempre 50, do
+// mata-mata da Segunda Fase até a Final).
+const PENALTY_BONUS_POINTS = 50;
+// Fases de mata-mata (jogo único, decidido nos pênaltis em caso de empate).
+// A Fase de Grupos nunca vai a pênaltis, por isso fica de fora.
+function isKnockoutPhase(phase) {
+  return phase !== "Fase de Grupos";
+}
 
 const INITIAL_MATCHES = [
   // ── Fase de Grupos (horários em UTC; convertidos automaticamente para o fuso de cada usuário) ──
@@ -119,7 +137,17 @@ function isLocked(m) {
 function hasPred(pred) {
   return pred && pred.home !== undefined && pred.home !== "" && pred.away !== undefined && pred.away !== "";
 }
-function calcPoints(pred, real, phase) {
+function hasPenaltyPred(pred) {
+  return pred && pred.penHome !== undefined && pred.penHome !== "" && pred.penAway !== undefined && pred.penAway !== "";
+}
+// Um jogo de mata-mata só vai a pênaltis se terminou empatado no placar normal.
+function isDrawResult(homeScore, awayScore) {
+  return homeScore !== null && awayScore !== null && Number(homeScore) === Number(awayScore);
+}
+// Pontos base (placar/resultado), sem o bônus de pênaltis — usados para a
+// regra "esses pontos não dobram nas próximas fases": o multiplicador da fase
+// nunca incide sobre o bônus de pênaltis, que é sempre fixo.
+function calcBasePoints(pred, real, phase) {
   if (!hasPred(pred) || real.homeScore === null) return 0;
   const mult = PHASE_MULTIPLIERS[phase] || 1;
   if (Number(pred.home) === real.homeScore && Number(pred.away) === real.awayScore) return BASE_POINTS.exact * mult;
@@ -128,11 +156,44 @@ function calcPoints(pred, real, phase) {
   if (pw === rw) return BASE_POINTS.winner * mult;
   return 0;
 }
-function getResultLabel(pts, phase) {
+// Bônus fixo de pênaltis: só existe em fases de mata-mata, só quando o jogo
+// terminou empatado no tempo normal, só quando o jogador também palpitou
+// empate (faz sentido ele ter preenchido o placar dos pênaltis), e só quando
+// o placar de pênaltis palpitado bate exatamente com o oficial.
+function calcPenaltyBonus(pred, real, phase) {
+  if (!isKnockoutPhase(phase)) return 0;
+  if (!isDrawResult(real.homeScore, real.awayScore)) return 0;
+  if (!hasPred(pred) || Number(pred.home) !== Number(pred.away)) return 0; // jogador não palpitou empate
+  if (!hasPenaltyPred(pred)) return 0; // jogador não preencheu o placar dos pênaltis
+  if (!hasPenaltyPred(real) ) return 0; // admin ainda não registrou o placar oficial dos pênaltis
+  if (Number(pred.penHome) === Number(real.penHome) && Number(pred.penAway) === Number(real.penAway)) {
+    return PENALTY_BONUS_POINTS;
+  }
+  return 0;
+}
+function calcPoints(pred, real, phase) {
+  return calcBasePoints(pred, real, phase) + calcPenaltyBonus(pred, real, phase);
+}
+function getResultLabel(pts, phase, penaltyBonus = 0) {
   const mult = PHASE_MULTIPLIERS[phase] || 1;
-  if (pts === 10 * mult) return { label: "🎯 Placar Cravado!", color: "#00e676" };
-  if (pts === 5 * mult)  return { label: "✅ Acertou Resultado", color: "#ffeb3b" };
+  const basePts = pts - penaltyBonus;
+  if (basePts === 10 * mult) return { label: penaltyBonus > 0 ? "🎯 Placar Cravado! + Pênaltis 🥅" : "🎯 Placar Cravado!", color: "#00e676" };
+  if (basePts === 5 * mult)  return { label: penaltyBonus > 0 ? "✅ Acertou Resultado + Pênaltis 🥅" : "✅ Acertou Resultado", color: "#ffeb3b" };
   return { label: "❌ Errou", color: "#ef5350" };
+}
+// Decide qual fase deve aparecer selecionada por padrão quando o usuário abre
+// uma tela com abas de fase (Meus Palpites, Resultados, etc.): a primeira fase,
+// na ordem do campeonato, que ainda tem pelo menos um jogo sem resultado oficial.
+// Se todas as fases já tiverem todos os jogos com resultado, fica na última fase
+// (a Final), já que não há mais nada "em aberto" para mostrar.
+function getDefaultPhase(matches, phases) {
+  for (const phase of phases) {
+    const phaseMatches = matches.filter(m => m.phase === phase);
+    if (phaseMatches.length === 0) continue;
+    const allDone = phaseMatches.every(m => m.homeScore !== null);
+    if (!allDone) return phase;
+  }
+  return phases[phases.length - 1] || "Fase de Grupos";
 }
 // As escolhas de Artilheiro/Garçom fecham quando a Segunda Fase terminar
 // (todos os jogos dessa fase já têm placar). Se a Copa não tiver Segunda Fase
@@ -369,11 +430,19 @@ function mergeOfficial(localMatches, official) {
   return official.map(o => {
     const prev = localById.get(o.id);
     let homeScore = o.homeScore, awayScore = o.awayScore;
+    let penHome = prev?.penHome ?? null, penAway = prev?.penAway ?? null;
     if ((homeScore === null || awayScore === null) && prev && prev.homeScore !== null && prev.awayScore !== null) {
       homeScore = prev.homeScore;
       awayScore = prev.awayScore;
     }
-    return { ...o, homeScore, awayScore };
+    // O placar de pênaltis é sempre registrado manualmente pelo admin (a fonte
+    // oficial de jogos não traz pênaltis), então preserva o que já estava salvo
+    // — mas só faz sentido mantê-lo se o placar normal ainda bateu empate.
+    if (homeScore === null || awayScore === null || Number(homeScore) !== Number(awayScore)) {
+      penHome = null;
+      penAway = null;
+    }
+    return { ...o, homeScore, awayScore, penHome, penAway };
   });
 }
 
@@ -622,10 +691,13 @@ export default function BolaoApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
-  // ── BACKUP AUTOMÁTICO DIÁRIO ──
-  // Sempre que o app está aberto, verifica se já passou 1 dia desde o último
-  // backup automático salvo no Supabase. Se sim, salva um novo snapshot e
-  // mantém só os 10 mais recentes (os backups manuais não são afetados).
+  // ── BACKUP AUTOMÁTICO 4X POR DIA (00h, 06h, 12h, 18h) ──
+  // Sempre que o app está aberto, verifica se já entramos em uma nova "janela"
+  // de 6 horas (00:00-06:00, 06:00-12:00, 12:00-18:00, 18:00-24:00, em UTC) desde
+  // o último backup automático salvo no Supabase. Se sim, salva um novo snapshot
+  // e mantém só os 10 mais recentes — os backups manuais não são afetados.
+  const BACKUP_INTERVAL_MS = 6 * 3600 * 1000; // 6 horas
+  const MAX_AUTO_BACKUPS = 10;
   useEffect(() => {
     if (!storageReady) return;
     let cancelled = false;
@@ -635,7 +707,10 @@ export default function BolaoApp() {
         const index = idxRes ? JSON.parse(idxRes.value) : [];
         const last = index.filter(b => b.auto)[0];
         const now = Date.now();
-        if (last && now - new Date(last.createdAt).getTime() < 24 * 3600 * 1000) return; // ainda não passou 1 dia
+        // Janela atual de 6h (0, 1, 2 ou 3 desde a meia-noite UTC)
+        const currentWindow = Math.floor(now / BACKUP_INTERVAL_MS);
+        const lastWindow = last ? Math.floor(new Date(last.createdAt).getTime() / BACKUP_INTERVAL_MS) : -1;
+        if (last && currentWindow === lastWindow) return; // já fizemos backup nesta janela de 6h
 
         // Lê o estado mais atual direto do Supabase (não da memória local) para
         // garantir que o backup reflita o que está realmente salvo.
@@ -656,19 +731,23 @@ export default function BolaoApp() {
         await storage.set(key, JSON.stringify(snapshot));
 
         const newEntry = { key, createdAt: snapshot.createdAt, auto: true, users: snapshot.users.length, matches: snapshot.matches.length };
-        const updatedIndex = [newEntry, ...index].slice(0, 30); // guarda no máx. 30 entradas no índice
-        await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updatedIndex));
+        let updatedIndex = [newEntry, ...index];
 
-        // Limpeza: mantém só os 10 backups automáticos mais recentes para não acumular lixo.
+        // Limpeza real: mantém só os 10 backups automáticos mais recentes,
+        // apagando de fato os snapshots antigos no Supabase (não só do índice).
         const autoEntries = updatedIndex.filter(b => b.auto);
-        if (autoEntries.length > 10) {
-          // Apenas remove do índice — não há custo real em manter a chave órfã no Supabase,
-          // mas evitamos que a lista cresça indefinidamente.
+        if (autoEntries.length > MAX_AUTO_BACKUPS) {
+          const toRemove = autoEntries.slice(MAX_AUTO_BACKUPS); // os mais antigos, além dos 10 permitidos
+          const removeKeys = new Set(toRemove.map(b => b.key));
+          await Promise.all(toRemove.map(b => storage.delete ? storage.delete(b.key) : Promise.resolve()));
+          updatedIndex = updatedIndex.filter(b => !removeKeys.has(b.key));
         }
+
+        await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updatedIndex));
       } catch {}
     };
     run();
-    const t = setInterval(run, 3600000); // verifica a cada 1 hora se já passou 1 dia
+    const t = setInterval(run, 600000); // verifica a cada 10 min se entramos em nova janela de 6h
     return () => { cancelled = true; clearInterval(t); };
   }, [storageReady]);
 
@@ -707,19 +786,21 @@ export default function BolaoApp() {
 
   const ranking = users.filter(u => !u.isAdmin && !u.inactive).map(u => {
     const preds = predictions[u.id] || {};
-    let total = 0, exact = 0;
+    let total = 0, exact = 0, penaltyHits = 0;
     matches.forEach(m => {
       if (m.homeScore === null) return;
-      const pts = calcPoints(preds[m.id], m, m.phase);
-      total += pts;
-      if (pts === BASE_POINTS.exact * (PHASE_MULTIPLIERS[m.phase] || 1)) exact++;
+      const basePts = calcBasePoints(preds[m.id], m, m.phase);
+      const penBonus = calcPenaltyBonus(preds[m.id], m, m.phase);
+      total += basePts + penBonus;
+      if (basePts === BASE_POINTS.exact * (PHASE_MULTIPLIERS[m.phase] || 1)) exact++;
+      if (penBonus > 0) penaltyHits++;
     });
     const myAwards = awardPicks[u.id] || {};
     let awardPts = 0;
     if (officialAwards.topScorer && myAwards.topScorer === officialAwards.topScorer) awardPts += AWARD_BONUS_POINTS;
     if (officialAwards.topAssist && myAwards.topAssist === officialAwards.topAssist) awardPts += AWARD_BONUS_POINTS;
     total += awardPts;
-    return { ...u, total, exact, awardPts };
+    return { ...u, total, exact, penaltyHits, awardPts };
   }).sort((a, b) => b.total - a.total || b.exact - a.exact);
 
   const phases = [...new Set(matches.map(m => m.phase))];
@@ -778,7 +859,16 @@ export default function BolaoApp() {
     if (!scoreUpdates || scoreUpdates.length === 0) return;
     setMatches(prev => prev.map(m => {
       const upd = scoreUpdates.find(u => u.match.id === m.id);
-      return upd ? { ...m, homeScore: upd.newHomeScore, awayScore: upd.newAwayScore } : m;
+      if (!upd) return m;
+      const stillDraw = Number(upd.newHomeScore) === Number(upd.newAwayScore);
+      return {
+        ...m,
+        homeScore: upd.newHomeScore,
+        awayScore: upd.newAwayScore,
+        // Se o novo resultado deixou de ser empate, o placar de pênaltis antigo perde sentido.
+        penHome: stillDraw ? m.penHome : null,
+        penAway: stillDraw ? m.penAway : null,
+      };
     }));
     addToast(`✅ ${scoreUpdates.length} resultado(s) atualizado(s)!`, "success");
     setScoreUpdates(null);
@@ -1408,6 +1498,9 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
           <div style={{ background: "rgba(0,188,212,0.1)", border: "1px solid rgba(0,188,212,0.3)", borderRadius: 10, padding: "10px 14px", textAlign: "center", marginBottom: 14 }}>
             <span style={{ color: "#90a4ae", fontSize: 12 }}>Resultado oficial: </span>
             <strong style={{ color: "#fff", fontSize: 20 }}>{match.homeScore} × {match.awayScore}</strong>
+            {isDrawResult(match.homeScore, match.awayScore) && hasPenaltyPred(match) && (
+              <div style={{ color: "#ffd600", fontSize: 11, marginTop: 4 }}>🥅 Pênaltis: {match.penHome} × {match.penAway}</div>
+            )}
           </div>
         )}
 
@@ -1416,8 +1509,9 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
           {users.map(u => {
             const pred = predictions[u.id]?.[match.id];
             const noPred = !hasPred(pred);
+            const penBonus = (!noPred && match.homeScore !== null) ? calcPenaltyBonus(pred, match, match.phase) : 0;
             const pts = (!noPred && match.homeScore !== null) ? calcPoints(pred, match, match.phase) : null;
-            const res = pts !== null ? getResultLabel(pts, match.phase) : null;
+            const res = pts !== null ? getResultLabel(pts, match.phase, penBonus) : null;
             return (
               <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, background: noPred ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.05)", borderRadius: 10, padding: "10px 12px", border: `1px solid ${res ? res.color + "44" : "rgba(255,255,255,0.07)"}` }}>
                 <Avatar name={u.displayName} size={34} photoUrl={u.photoUrl} />
@@ -1426,9 +1520,14 @@ function AllPredictionsModal({ match, users, predictions, onClose }) {
                   <span style={{ color: "#37474f", fontSize: 12, fontStyle: "italic" }}>sem palpite</span>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontWeight: 800, fontSize: 17, color: "#fff", background: "rgba(255,255,255,0.09)", padding: "4px 12px", borderRadius: 8, letterSpacing: 1 }}>
-                      {pred.home} × {pred.away}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <span style={{ fontWeight: 800, fontSize: 17, color: "#fff", background: "rgba(255,255,255,0.09)", padding: "4px 12px", borderRadius: 8, letterSpacing: 1 }}>
+                        {pred.home} × {pred.away}
+                      </span>
+                      {hasPenaltyPred(pred) && Number(pred.home) === Number(pred.away) && (
+                        <span style={{ fontSize: 10, color: "#ffd600", marginTop: 2 }}>🥅 {pred.penHome}×{pred.penAway}</span>
+                      )}
+                    </div>
                     {res && (
                       <span style={{ fontSize: 11, fontWeight: 800, color: res.color, minWidth: 50, textAlign: "right" }}>
                         {pts > 0 ? `+${pts}pts` : "0pts"}
@@ -1554,6 +1653,15 @@ function AwardsScreen({ currentUser, matches, awardPicks, officialAwards, users,
 }
 
 function PredictionsScreen({ currentUser, users, matches, phases, activePhase, setActivePhase, tempPredictions, setTempPredictions, predictions, handleSavePredictions, savedAlert, setScreen }) {
+  // Ao ENTRAR nesta tela, seleciona automaticamente a fase "atual" (a primeira
+  // que ainda tem jogo sem resultado) — ex.: terminando a Fase de Grupos, abre
+  // direto na Segunda Fase. Roda só uma vez na montagem (não a cada resultado
+  // novo) para não trocar a aba debaixo do usuário enquanto ele está navegando.
+  useEffect(() => {
+    setActivePhase(getDefaultPhase(matches, phases));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const mult = PHASE_MULTIPLIERS[activePhase] || 1;
   const filtered = [...matches.filter(m => m.phase === activePhase)].sort((a, b) => {
     const aLocked = isLocked(a);
@@ -1574,7 +1682,13 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
     const temp = tempPredictions[m.id];
     const saved = savedPreds[m.id];
     if (!temp) return false;
-    return temp.home !== saved?.home || temp.away !== saved?.away;
+    if (temp.home !== saved?.home || temp.away !== saved?.away) return true;
+    // Também conta como pendente se o placar de pênaltis (palpite de empate em mata-mata) mudou.
+    const tempIsDraw = temp.home !== "" && temp.home !== undefined && Number(temp.home) === Number(temp.away);
+    if (isKnockoutPhase(m.phase) && tempIsDraw) {
+      if (temp.penHome !== saved?.penHome || temp.penAway !== saved?.penAway) return true;
+    }
+    return false;
   });
 
   return (
@@ -1602,8 +1716,14 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
           const pred = tempPredictions[m.id] || {};
           const saved = savedPreds[m.id];
           const hasSaved = hasPred(saved);
-          const result = m.homeScore !== null && hasSaved ? getResultLabel(calcPoints(saved, m, m.phase), m.phase) : null;
+          const basePts = m.homeScore !== null && hasSaved ? calcBasePoints(saved, m, m.phase) : 0;
+          const penBonus = m.homeScore !== null && hasSaved ? calcPenaltyBonus(saved, m, m.phase) : 0;
+          const result = m.homeScore !== null && hasSaved ? getResultLabel(basePts + penBonus, m.phase, penBonus) : null;
           const closingSoon = mins > LOCK_MINUTES_BEFORE && mins <= NOTIFY_MINUTES_BEFORE;
+          const knockout = isKnockoutPhase(m.phase);
+          const predIsDraw = pred.home !== "" && pred.home !== undefined && pred.away !== "" && pred.away !== undefined && Number(pred.home) === Number(pred.away);
+          const matchIsDraw = isDrawResult(m.homeScore, m.awayScore);
+          const savedIsDraw = hasSaved && Number(saved.home) === Number(saved.away);
 
           return (
             <div
@@ -1638,11 +1758,32 @@ function PredictionsScreen({ currentUser, users, matches, phases, activePhase, s
                 <span style={styles.team}>{m.away}</span>
               </div>
 
+              {/* Palpite de pênaltis: só aparece em fases de mata-mata quando o palpite normal está empatado.
+                  Acertar o placar exato dos pênaltis vale +50 pontos fixos (não multiplica pela fase). */}
+              {knockout && !locked && predIsDraw && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,214,0,0.25)", textAlign: "center" }}>
+                  <span style={{ color: "#ffd600", fontSize: 11, fontWeight: 700 }}>🥅 Empate! Palpite os pênaltis (+{PENALTY_BONUS_POINTS}pts se cravar)</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 6 }}>
+                    <input type="number" min={0} max={20} value={pred.penHome ?? ""} onChange={e => setPred(m.id, "penHome", e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                    <span style={{ color: "#546e7a", fontSize: 14 }}>×</span>
+                    <input type="number" min={0} max={20} value={pred.penAway ?? ""} onChange={e => setPred(m.id, "penAway", e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                  </div>
+                </div>
+              )}
+              {knockout && locked && savedIsDraw && hasPenaltyPred(saved) && m.homeScore === null && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,214,0,0.25)", textAlign: "center" }}>
+                  <span style={{ color: "#ffd600", fontSize: 11 }}>🥅 Seu palpite de pênaltis: <strong>{saved.penHome} × {saved.penAway}</strong></span>
+                </div>
+              )}
+
               {m.homeScore !== null && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
                   <span style={{ color: "#90a4ae", fontSize: 11 }}>Resultado: </span>
                   <strong style={{ color: "#e0e0e0" }}>{m.homeScore} × {m.awayScore}</strong>
-                  {result && <span style={{ color: result.color, marginLeft: 10, fontSize: 11, fontWeight: 700 }}>{result.label} (+{calcPoints(saved, m, m.phase)} pts)</span>}
+                  {matchIsDraw && hasPenaltyPred(m) && (
+                    <span style={{ color: "#90a4ae", fontSize: 11, marginLeft: 6 }}>(pênaltis: {m.penHome}×{m.penAway})</span>
+                  )}
+                  {result && <span style={{ color: result.color, marginLeft: 10, fontSize: 11, fontWeight: 700 }}>{result.label} (+{basePts + penBonus} pts)</span>}
                   {!hasSaved && <span style={{ color: "#546e7a", marginLeft: 10, fontSize: 11 }}>sem palpite (0 pts)</span>}
                 </div>
               )}
@@ -1707,8 +1848,9 @@ function PlayerPredictionsModal({ player, matches, predictions, onClose }) {
           {finished.map(m => {
             const pred = myPreds[m.id];
             const noPred = !hasPred(pred);
+            const penBonus = (noPred || m.homeScore === null) ? 0 : calcPenaltyBonus(pred, m, m.phase);
             const pts = (noPred || m.homeScore === null) ? 0 : calcPoints(pred, m, m.phase);
-            const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase);
+            const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase, penBonus);
             return (
               <div key={m.id} style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${res ? res.color + "33" : "rgba(255,255,255,0.07)"}`, borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
@@ -1718,7 +1860,9 @@ function PlayerPredictionsModal({ player, matches, predictions, onClose }) {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1 }}>{m.home}</span>
                   {m.homeScore !== null && (
-                    <span style={{ fontSize: 11, color: "#78909c", whiteSpace: "nowrap" }}>{m.homeScore}×{m.awayScore}</span>
+                    <span style={{ fontSize: 11, color: "#78909c", whiteSpace: "nowrap" }}>
+                      {m.homeScore}×{m.awayScore}{isDrawResult(m.homeScore, m.awayScore) && hasPenaltyPred(m) ? ` (pên. ${m.penHome}×${m.penAway})` : ""}
+                    </span>
                   )}
                   <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1, textAlign: "right" }}>{m.away}</span>
                 </div>
@@ -1726,7 +1870,10 @@ function PlayerPredictionsModal({ player, matches, predictions, onClose }) {
                   {noPred ? (
                     <span style={{ fontSize: 12, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
                   ) : (
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#cfd8dc" }}>Palpite: {pred.home} × {pred.away}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#cfd8dc" }}>
+                      Palpite: {pred.home} × {pred.away}
+                      {hasPenaltyPred(pred) && Number(pred.home) === Number(pred.away) && <span style={{ color: "#ffd600", fontWeight: 600 }}> (pên. {pred.penHome}×{pred.penAway})</span>}
+                    </span>
                   )}
                   {res && <span style={{ fontSize: 11, fontWeight: 700, color: res.color }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
                 </div>
@@ -1915,6 +2062,13 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
   const [expanded, setExpanded] = useState({});
   const toggleExpand = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
 
+  // Mesmo comportamento da tela de Palpites: ao entrar aqui, seleciona a fase
+  // "atual" automaticamente (só na montagem da tela).
+  useEffect(() => {
+    setActivePhase(getDefaultPhase(matches, phases));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Order: the most recently closed/finished match comes first, then the
   // remaining matches in chronological order (soonest upcoming next, and so on).
   // A finished match stays "first" until the next match's start time arrives.
@@ -1959,6 +2113,11 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
                 </div>
                 <span style={styles.team}>{m.away}</span>
               </div>
+              {isDrawResult(m.homeScore, m.awayScore) && hasPenaltyPred(m) && (
+                <div style={{ textAlign: "center", marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: "#ffd600" }}>🥅 Pênaltis: {m.penHome}×{m.penAway}</span>
+                </div>
+              )}
 
               {/* Predictions are only ever shown for matches whose betting window
                   has already closed — never reveal picks for open matches. */}
@@ -1976,8 +2135,9 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
                       {users.map(u => {
                         const pred = predictions[u.id]?.[m.id];
                         const noPred = !hasPred(pred);
+                        const penBonus = (noPred || m.homeScore === null) ? 0 : calcPenaltyBonus(pred, m, m.phase);
                         const pts = (noPred || m.homeScore === null) ? 0 : calcPoints(pred, m, m.phase);
-                        const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase);
+                        const res = (noPred || m.homeScore === null) ? null : getResultLabel(pts, m.phase, penBonus);
                         return (
                           <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "4px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
                             <Avatar name={u.displayName} size={22} photoUrl={u.photoUrl} />
@@ -1985,7 +2145,10 @@ function ResultsScreen({ matches, predictions, users, setScreen, currentUser, ph
                             {noPred
                               ? <span style={{ fontSize: 11, color: "#37474f", fontStyle: "italic" }}>sem palpite</span>
                               : <>
-                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>{pred.home}×{pred.away}</span>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#cfd8dc", marginRight: 8 }}>
+                                    {pred.home}×{pred.away}
+                                    {hasPenaltyPred(pred) && Number(pred.home) === Number(pred.away) && <span style={{ color: "#ffd600" }}> ({pred.penHome}×{pred.penAway})</span>}
+                                  </span>
                                   {res && <span style={{ fontSize: 11, color: res.color, fontWeight: 700 }}>{pts > 0 ? `+${pts}pts` : "0pts"}</span>}
                                 </>
                             }
@@ -2205,7 +2368,7 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
     <div style={styles.infoCard2}>
       <strong style={{ color: "#e0e0e0", fontSize: 14 }}>💾 Backup dos Dados</strong>
       <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
-        Um backup automático é salvo na nuvem todo dia. Você também pode salvar manualmente ou baixar um arquivo.
+        Um backup automático é salvo na nuvem 4x por dia (00h, 06h, 12h e 18h UTC). Você também pode salvar manualmente ou baixar um arquivo.
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -2340,7 +2503,18 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, awardPi
   const saveScore = (id) => {
     const sc = adminScores[id];
     if (sc?.home === undefined || sc?.away === undefined || sc?.home === "" || sc?.away === "") return;
-    setMatches(p => p.map(m => m.id === id ? { ...m, homeScore: Number(sc.home), awayScore: Number(sc.away) } : m));
+    const m = matches.find(x => x.id === id);
+    const isDraw = Number(sc.home) === Number(sc.away);
+    const willHavePenalties = m && isKnockoutPhase(m.phase) && isDraw && sc.penHome !== undefined && sc.penAway !== undefined && sc.penHome !== "" && sc.penAway !== "";
+    setMatches(p => p.map(x => x.id === id ? {
+      ...x,
+      homeScore: Number(sc.home),
+      awayScore: Number(sc.away),
+      // Placar de pênaltis só é salvo quando o jogo empatou e o admin preencheu;
+      // caso contrário, limpa (ex.: se o admin corrigir o placar e deixar de ser empate).
+      penHome: willHavePenalties ? Number(sc.penHome) : null,
+      penAway: willHavePenalties ? Number(sc.penAway) : null,
+    } : x));
   };
 
 
@@ -2403,22 +2577,41 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, awardPi
         </div>
 
         <p style={{ color: "#78909c", fontSize: 12, marginBottom: 10, marginTop: 12 }}>Registrar resultados dos jogos:</p>
-        {filtered.map(m => (
+        {filtered.map(m => {
+          const sc = adminScores[m.id];
+          const homeVal = sc?.home ?? (m.homeScore !== null ? m.homeScore : "");
+          const awayVal = sc?.away ?? (m.awayScore !== null ? m.awayScore : "");
+          const isDraw = homeVal !== "" && awayVal !== "" && Number(homeVal) === Number(awayVal);
+          const showPenaltyFields = isKnockoutPhase(m.phase) && isDraw;
+          return (
           <div key={m.id} style={styles.adminMatchCard}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ color: "#78909c", fontSize: 11 }}>📅 {m.date} {m.time}</span>
-              {m.homeScore !== null ? <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>✅ {m.homeScore}×{m.awayScore}</span> : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando</span>}
+              {m.homeScore !== null ? (
+                <span style={{ color: "#4caf50", fontSize: 11, fontWeight: 700 }}>
+                  ✅ {m.homeScore}×{m.awayScore}{hasPenaltyPred(m) ? ` (pên. ${m.penHome}×${m.penAway})` : ""}
+                </span>
+              ) : <span style={{ color: "#546e7a", fontSize: 11 }}>Aguardando</span>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: "#cfd8dc", flex: 1, minWidth: 80 }}>{m.home}</span>
-              <input type="number" min={0} max={30} value={adminScores[m.id]?.home ?? (m.homeScore !== null ? m.homeScore : "")} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], home: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
+              <input type="number" min={0} max={30} value={homeVal} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], home: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
               <span style={{ color: "#546e7a" }}>×</span>
-              <input type="number" min={0} max={30} value={adminScores[m.id]?.away ?? (m.awayScore !== null ? m.awayScore : "")} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], away: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
+              <input type="number" min={0} max={30} value={awayVal} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], away: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
               <span style={{ fontSize: 12, fontWeight: 600, color: "#cfd8dc", flex: 1, minWidth: 80, textAlign: "right" }}>{m.away}</span>
               <button onClick={() => saveScore(m.id)} style={styles.btnSaveSmall}>Salvar</button>
             </div>
+            {showPenaltyFields && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: "1px dashed rgba(255,214,0,0.25)" }}>
+                <span style={{ fontSize: 11, color: "#ffd600", fontWeight: 700, flex: 1, minWidth: 110 }}>🥅 Pênaltis (empate):</span>
+                <input type="number" min={0} max={30} value={adminScores[m.id]?.penHome ?? (m.penHome ?? "")} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], penHome: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
+                <span style={{ color: "#546e7a" }}>×</span>
+                <input type="number" min={0} max={30} value={adminScores[m.id]?.penAway ?? (m.penAway ?? "")} onChange={e => setAdminScores(p => ({ ...p, [m.id]: { ...p[m.id], penAway: e.target.value } }))} style={styles.scoreInputSm} placeholder="0" />
+              </div>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
