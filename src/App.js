@@ -76,6 +76,10 @@ const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
 const BACKUP_INDEX_KEY = "bolao:backup:index";
+// Backup automático 4x por dia (a cada 6h: 00h, 06h, 12h, 18h UTC), mantendo
+// só os 10 mais recentes — usado pelo useEffect de backup automático.
+const BACKUP_INTERVAL_MS = 6 * 3600 * 1000;
+const MAX_AUTO_BACKUPS = 10;
 const AWARD_BONUS_POINTS = 150;
 // Pontos extras fixos por cravar o placar dos pênaltis num jogo de mata-mata
 // que terminou empatado. Não é multiplicado pela fase (vale sempre 50, do
@@ -696,8 +700,6 @@ export default function BolaoApp() {
   // de 6 horas (00:00-06:00, 06:00-12:00, 12:00-18:00, 18:00-24:00, em UTC) desde
   // o último backup automático salvo no Supabase. Se sim, salva um novo snapshot
   // e mantém só os 10 mais recentes — os backups manuais não são afetados.
-  const BACKUP_INTERVAL_MS = 6 * 3600 * 1000; // 6 horas
-  const MAX_AUTO_BACKUPS = 10;
   useEffect(() => {
     if (!storageReady) return;
     let cancelled = false;
