@@ -426,13 +426,28 @@ async function fetchMatchesFromAI() {
 // nome do atleta concatenado com a seleção (traduzida) — ex.: "Messi Lionel — 🇦🇷 Argentina".
 
 // ─── MESCLAR TABELA OFICIAL COM OS DADOS LOCAIS ────────────────────────────────
-// Usa a tabela oficial como base (horários corretos em Brasília + placares reais
-// dos jogos encerrados) e, se a fonte ainda não tiver o placar de um jogo, mantém
-// o placar que o admin tenha lançado manualmente. Casa as partidas pelo id.
+// Usa a tabela oficial para horários corretos em Brasília + placares reais dos
+// jogos encerrados, mas SEMPRE em forma de UNIÃO com os dados locais — nunca
+// remove um jogo que já existia localmente, mesmo que ele não apareça na
+// resposta deste ciclo (a fonte externa pode falhar parcialmente, mudar de
+// formato ou ficar fora do ar por alguns minutos; se isso acontecesse e a
+// função apenas devolvesse a lista oficial, jogos e os palpites associados a
+// eles "desapareceriam" da tela para todos os jogadores até o próximo ciclo
+// bem-sucedido — foi exatamente esse risco que motivou a reescrita abaixo).
+//
+// Casamento por jogo: tenta primeiro pelo "id" (estável entre ciclos quando a
+// fonte traz m.num); se não achar, casa por times+data como rede de segurança
+// adicional, já que o id pode mudar de um ciclo para outro se a fonte externa
+// alterar a ordem do array ou deixar de enviar "num" para algum jogo.
 function mergeOfficial(localMatches, official) {
-  const localById = new Map((localMatches || []).map(m => [m.id, m]));
-  return official.map(o => {
-    const prev = localById.get(o.id);
+  const local = localMatches || [];
+  const localById = new Map(local.map(m => [m.id, m]));
+  const localByTeamsDate = new Map(local.map(m => [`${m.home}__${m.away}__${m.date}`, m]));
+
+  const mergedOfficialIds = new Set();
+  const mergedFromOfficial = official.map(o => {
+    const prev = localById.get(o.id) || localByTeamsDate.get(`${o.home}__${o.away}__${o.date}`);
+    if (prev) mergedOfficialIds.add(prev.id);
     let homeScore = o.homeScore, awayScore = o.awayScore;
     let penHome = prev?.penHome ?? null, penAway = prev?.penAway ?? null;
     if ((homeScore === null || awayScore === null) && prev && prev.homeScore !== null && prev.awayScore !== null) {
@@ -446,8 +461,16 @@ function mergeOfficial(localMatches, official) {
       penHome = null;
       penAway = null;
     }
-    return { ...o, homeScore, awayScore, penHome, penAway };
+    // Mantém o id LOCAL quando já existia um jogo casado, para não quebrar a
+    // referência usada pelos palpites (predictions são indexados por match.id).
+    const id = prev ? prev.id : o.id;
+    return { ...o, id, homeScore, awayScore, penHome, penAway };
   });
+
+  // Qualquer jogo que existia localmente mas não veio na resposta deste ciclo
+  // (fonte externa incompleta/instável) é mantido como estava, sem alteração.
+  const missingLocal = local.filter(m => !mergedOfficialIds.has(m.id));
+  return [...mergedFromOfficial, ...missingLocal];
 }
 
 // ─── CHECK FOR NEW RESULTS ──────────────────────────────────────────────────────
@@ -538,6 +561,14 @@ export default function BolaoApp() {
   // Game state
   const [matches, setMatches] = useState(INITIAL_MATCHES);
   const [predictions, setPredictions] = useState({});
+  // Auditoria: histórico de TODAS as versões de palpite que cada jogador já
+  // salvou (não apaga as antigas quando ele altera). Estrutura:
+  // { [userId]: { [matchId]: [ { home, away, penHome?, penAway?, savedAt, source }, ... ] } }
+  // "source" é "player" (o próprio jogador salvou) ou "admin" (admin corrigiu
+  // manualmente, ex.: quando o jogador alega que um palpite "sumiu").
+  // Cada entrada nova é ACRESCENTADA ao array (nunca sobrescreve as anteriores),
+  // sempre com a data/hora em que foi salva — inclusive se o valor não mudou.
+  const [auditLog, setAuditLog] = useState({});
   const [tempPredictions, setTempPredictions] = useState({});
   // Palpites de "Artilheiro" e "Garçom" da Copa: { [userId]: { topScorer: "Nome", topAssist: "Nome" } }
   const [awardPicks, setAwardPicks] = useState({});
@@ -559,12 +590,13 @@ export default function BolaoApp() {
     async function load() {
       let loadedUsers = null;
       try {
-        const [u, m, p, ap, oa] = await Promise.all([
+        const [u, m, p, ap, oa, al] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
           storage.get("bolao:predictions"),
           storage.get("bolao:awardPicks"),
           storage.get("bolao:officialAwards"),
+          storage.get("bolao:auditLog"),
         ]);
         if (u) {
           const loaded = JSON.parse(u.value);
@@ -577,6 +609,7 @@ export default function BolaoApp() {
         if (p) setPredictions(JSON.parse(p.value));
         if (ap) setAwardPicks(JSON.parse(ap.value));
         if (oa) setOfficialAwards(JSON.parse(oa.value));
+        if (al) setAuditLog(JSON.parse(al.value));
       } catch {
         // First run or storage empty — use defaults
       }
@@ -620,6 +653,12 @@ export default function BolaoApp() {
     storage.set("bolao:predictions", JSON.stringify(predictions)).catch(() => {});
   }, [predictions, storageReady]);
 
+  // ── SAVE AUDIT LOG (histórico de todos os palpites já salvos) TO STORAGE ──
+  useEffect(() => {
+    if (!storageReady) return;
+    storage.set("bolao:auditLog", JSON.stringify(auditLog)).catch(() => {});
+  }, [auditLog, storageReady]);
+
   // ── SAVE AWARD PICKS (Artilheiro/Garçom) TO STORAGE ──
   useEffect(() => {
     if (!storageReady) return;
@@ -643,12 +682,13 @@ export default function BolaoApp() {
     if (!storageReady) return;
     const sync = async () => {
       try {
-        const [u, m, p, ap, oa] = await Promise.all([
+        const [u, m, p, ap, oa, al] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
           storage.get("bolao:predictions"),
           storage.get("bolao:awardPicks"),
           storage.get("bolao:officialAwards"),
+          storage.get("bolao:auditLog"),
         ]);
         if (u) {
           const loaded = JSON.parse(u.value);
@@ -658,6 +698,7 @@ export default function BolaoApp() {
         if (p) setPredictions(JSON.parse(p.value));
         if (ap) setAwardPicks(JSON.parse(ap.value));
         if (oa) setOfficialAwards(JSON.parse(oa.value));
+        if (al) setAuditLog(JSON.parse(al.value));
       } catch {}
     };
     const t = setInterval(sync, 20000);
@@ -681,6 +722,12 @@ export default function BolaoApp() {
           const remote = await storage.get("bolao:matches");
           if (remote) { base = JSON.parse(remote.value); baseStr = remote.value; }
         } catch {}
+        // Proteção extra: se a fonte externa vier visivelmente truncada (bem
+        // menos jogos do que já temos salvo), é sinal de resposta instável ou
+        // parcial — melhor pular este ciclo do que arriscar perder jogos.
+        // mergeOfficial() já é uma união segura por si só, mas esse early-return
+        // evita até processar uma resposta claramente anômala.
+        if (base.length > 0 && official.length < base.length * 0.5) return;
         const merged = mergeOfficial(base, official);
         const mergedStr = JSON.stringify(merged);
         if (mergedStr !== (baseStr ?? JSON.stringify(base))) {
@@ -774,10 +821,11 @@ export default function BolaoApp() {
 
         // Lê o estado mais atual direto do Supabase (não da memória local) para
         // garantir que o backup reflita o que está realmente salvo.
-        const [u, m, p] = await Promise.all([
+        const [u, m, p, al] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
           storage.get("bolao:predictions"),
+          storage.get("bolao:auditLog"),
         ]);
         if (cancelled) return;
         const snapshot = {
@@ -786,6 +834,7 @@ export default function BolaoApp() {
           users: u ? JSON.parse(u.value).filter(x => !x.isAdmin) : [],
           matches: m ? JSON.parse(m.value) : [],
           predictions: p ? JSON.parse(p.value) : {},
+          auditLog: al ? JSON.parse(al.value) : {},
         };
         await storage.set(snapshotKey, JSON.stringify(snapshot));
 
@@ -852,6 +901,25 @@ export default function BolaoApp() {
 
   const phases = [...new Set(matches.map(m => m.phase))];
 
+  // Acrescenta novas entradas ao histórico de auditoria de um usuário, SEM
+  // apagar as anteriores, mesclando primeiro com a versão mais recente do
+  // Supabase (para não perder entradas gravadas por outro navegador/jogador
+  // entre a leitura e a escrita).
+  const appendAuditEntries = async (userId, entriesByMatchId) => {
+    let latestLog = auditLog;
+    try {
+      const remote = await storage.get("bolao:auditLog");
+      if (remote) latestLog = JSON.parse(remote.value);
+    } catch {}
+    const userLog = { ...(latestLog[userId] || {}) };
+    Object.entries(entriesByMatchId).forEach(([matchId, entry]) => {
+      const prevEntries = userLog[matchId] || [];
+      userLog[matchId] = [...prevEntries, entry];
+    });
+    const merged = { ...latestLog, [userId]: userLog };
+    setAuditLog(merged);
+  };
+
   const handleSavePredictions = async () => {
     // Fetch the freshest predictions from Supabase first, so we don't
     // overwrite other participants' saves that happened concurrently.
@@ -862,9 +930,40 @@ export default function BolaoApp() {
     } catch {}
     const merged = { ...latest, [currentUser.id]: { ...tempPredictions } };
     setPredictions(merged);
+
+    // Auditoria: registra uma nova entrada para CADA jogo com palpite
+    // preenchido neste save — mesmo que o valor seja igual ao salvo antes,
+    // para o admin conseguir ver todas as vezes que o jogador salvou e quando.
+    const savedAt = new Date().toISOString();
+    const entries = {};
+    Object.entries(tempPredictions).forEach(([matchId, pred]) => {
+      if (!hasPred(pred)) return;
+      entries[matchId] = { home: pred.home, away: pred.away, penHome: pred.penHome ?? null, penAway: pred.penAway ?? null, savedAt, source: "player" };
+    });
+    if (Object.keys(entries).length > 0) await appendAuditEntries(currentUser.id, entries);
+
     setSavedAlert(true);
     addToast("💾 Palpites salvos com sucesso!", "success");
     setTimeout(() => setSavedAlert(false), 3000);
+  };
+
+  // Admin corrige manualmente o palpite de um jogador (ex.: jogador alega que
+  // um palpite "sumiu" e o admin confirma na auditoria que ele realmente
+  // apostou). Substitui o palpite atual normalmente, e fica registrado no
+  // histórico de auditoria como alterado pelo admin, com o nome de quem fez.
+  const handleAdminEditPrediction = async (userId, matchId, pred) => {
+    let latestPreds = predictions;
+    try {
+      const remote = await storage.get("bolao:predictions");
+      if (remote) latestPreds = JSON.parse(remote.value);
+    } catch {}
+    const mergedPreds = { ...latestPreds, [userId]: { ...(latestPreds[userId] || {}), [matchId]: pred } };
+    setPredictions(mergedPreds);
+
+    const savedAt = new Date().toISOString();
+    await appendAuditEntries(userId, {
+      [matchId]: { home: pred.home, away: pred.away, penHome: pred.penHome ?? null, penAway: pred.penAway ?? null, savedAt, source: "admin", adminName: currentUser?.displayName || "Admin" },
+    });
   };
 
   // Salva a escolha de Artilheiro/Garçom do usuário, mesclando com a versão
@@ -934,7 +1033,7 @@ export default function BolaoApp() {
   // ── ROUTER ──
   const regularUsers = users.filter(u => !u.isAdmin && !u.inactive);
   const allNonAdminUsers = users.filter(u => !u.isAdmin);
-  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, tempPredictions, setTempPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, handleSaveAwardPick, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
+  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, tempPredictions, setTempPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, handleSaveAwardPick, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
 
   // Trava de segurança: se a senha ainda precisa ser trocada, nenhuma outra tela
   // logada pode ser exibida — força sempre a tela de redefinição.
@@ -2302,7 +2401,7 @@ function ScoreUpdatesPanel({ checkingUpdates, checkError, scoreUpdates, handleCh
 }
 
 // ─── BACKUP PANEL ─────────────────────────────────────────────────────────────
-function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAwards, setUsers, setMatches, setPredictions, setAwardPicks, setOfficialAwards, addToast }) {
+function BackupPanel({ allUsers, matches, predictions, auditLog, setAuditLog, awardPicks, officialAwards, setUsers, setMatches, setPredictions, setAwardPicks, setOfficialAwards, addToast }) {
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [backupList, setBackupList] = useState(null);
@@ -2329,6 +2428,7 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
       users: allUsers.filter(u => !u.isAdmin),
       matches,
       predictions,
+      auditLog,
       awardPicks,
       officialAwards,
     };
@@ -2358,6 +2458,7 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
         setUsers(merged);
         setMatches(data.matches);
         setPredictions(data.predictions);
+        setAuditLog(data.auditLog || {});
         setAwardPicks(data.awardPicks || {});
         setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
         addToast(`✅ Backup restaurado! (${data.users.length} jogadores, ${data.matches.length} jogos)`, "success");
@@ -2375,7 +2476,7 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
     setSavingSnapshot(true);
     try {
       const createdAt = new Date().toISOString();
-      const snapshot = { createdAt, auto: false, users: allUsers.filter(u => !u.isAdmin), matches, predictions, awardPicks, officialAwards };
+      const snapshot = { createdAt, auto: false, users: allUsers.filter(u => !u.isAdmin), matches, predictions, auditLog, awardPicks, officialAwards };
       const key = `bolao:backup:${createdAt}`;
       await storage.set(key, JSON.stringify(snapshot));
       const idxRes = await storage.get(BACKUP_INDEX_KEY);
@@ -2404,6 +2505,7 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
       setAwardPicks(data.awardPicks || {});
       setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
       setPredictions(data.predictions);
+      setAuditLog(data.auditLog || {});
       addToast(`✅ Backup de ${formatBackupDate(entry.createdAt)} restaurado!`, "success");
     } catch {
       addToast("❌ Não foi possível restaurar esse backup.", "warning");
@@ -2463,6 +2565,203 @@ function BackupPanel({ allUsers, matches, predictions, awardPicks, officialAward
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AUDITORIA: histórico de palpites de um jogador, com edição pelo admin ───
+// Para cada jogo, mostra TODAS as versões já salvas pelo jogador (mais recente
+// primeiro), com data/hora exata, e quem fez a alteração ("jogador" ou
+// "admin"). O admin pode corrigir o palpite de um jogo direto por aqui — útil
+// quando o jogador alega que um palpite "sumiu" e a auditoria confirma que ele
+// realmente apostou.
+function AuditModal({ player, matches, predictions, auditLog, handleAdminEditPrediction, onClose, addToast }) {
+  const [editingMatchId, setEditingMatchId] = useState(null);
+  const [editHome, setEditHome] = useState("");
+  const [editAway, setEditAway] = useState("");
+  const [editPenHome, setEditPenHome] = useState("");
+  const [editPenAway, setEditPenAway] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const myLog = auditLog?.[player.id] || {};
+  const myPreds = predictions[player.id] || {};
+  // Ordena os jogos: primeiro os que têm histórico de auditoria (mais recente
+  // alterado primeiro), depois os demais por data.
+  const sorted = [...matches].sort((a, b) => {
+    const aHas = (myLog[a.id] || []).length > 0;
+    const bHas = (myLog[b.id] || []).length > 0;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    const aLast = aHas ? new Date(myLog[a.id][myLog[a.id].length - 1].savedAt).getTime() : 0;
+    const bLast = bHas ? new Date(myLog[b.id][myLog[b.id].length - 1].savedAt).getTime() : 0;
+    return bLast - aLast;
+  });
+
+  const startEdit = (m) => {
+    const current = myPreds[m.id] || {};
+    setEditingMatchId(m.id);
+    setEditHome(current.home ?? "");
+    setEditAway(current.away ?? "");
+    setEditPenHome(current.penHome ?? "");
+    setEditPenAway(current.penAway ?? "");
+  };
+
+  const cancelEdit = () => setEditingMatchId(null);
+
+  const confirmEdit = async (m) => {
+    if (editHome === "" || editAway === "") return;
+    setSaving(true);
+    const isDraw = Number(editHome) === Number(editAway);
+    const pred = {
+      home: Number(editHome),
+      away: Number(editAway),
+      penHome: isKnockoutPhase(m.phase) && isDraw && editPenHome !== "" ? Number(editPenHome) : null,
+      penAway: isKnockoutPhase(m.phase) && isDraw && editPenAway !== "" ? Number(editPenAway) : null,
+    };
+    try {
+      await handleAdminEditPrediction(player.id, m.id, pred);
+      addToast?.(`✅ Palpite de ${player.displayName} alterado para ${m.home} × ${m.away}!`, "success");
+      setEditingMatchId(null);
+    } catch {
+      addToast?.("❌ Não foi possível salvar a alteração.", "warning");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#0f1e30", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 520, padding: "20px 20px 32px", border: "1px solid rgba(255,255,255,0.12)", borderBottom: "none", maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ width: 40, height: 4, background: "#37474f", borderRadius: 2, margin: "0 auto 18px" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <Avatar name={player.displayName} size={40} photoUrl={player.photoUrl} />
+          <div style={{ flex: 1 }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16, color: "#fff" }}>🔍 Auditoria — {player.displayName}</h3>
+            <p style={{ margin: 0, color: "#78909c", fontSize: 11 }}>@{player.username}</p>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: "#90a4ae", fontSize: 16, cursor: "pointer", flexShrink: 0 }} title="Fechar">✕</button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {sorted.map(m => {
+            const history = myLog[m.id] || [];
+            const current = myPreds[m.id];
+            const isEditing = editingMatchId === m.id;
+            return (
+              <div key={m.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: "#78909c" }}>{m.phase}{m.group ? ` • Grupo ${m.group}` : ""}</span>
+                  <span style={{ fontSize: 10, color: "#546e7a" }}>{m.date} {m.time}</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#e0e0e0", marginBottom: 6 }}>{m.home} × {m.away}</div>
+
+                {history.length === 0 ? (
+                  <p style={{ color: "#37474f", fontSize: 12, fontStyle: "italic", margin: "4px 0" }}>Sem nenhum palpite registrado para este jogo.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                    {[...history].reverse().map((h, i) => {
+                      const isCurrent = i === 0;
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, background: isCurrent ? "rgba(0,230,118,0.07)" : "rgba(255,255,255,0.02)", border: `1px solid ${isCurrent ? "rgba(0,230,118,0.25)" : "rgba(255,255,255,0.05)"}`, borderRadius: 6, padding: "5px 8px" }}>
+                          <span style={{ fontWeight: 700, color: isCurrent ? "#00e676" : "#90a4ae", minWidth: 56 }}>
+                            {h.home}×{h.away}{h.penHome != null ? ` (${h.penHome}×${h.penAway})` : ""}
+                          </span>
+                          <span style={{ color: "#546e7a", flex: 1 }}>{formatBackupDate(h.savedAt)}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: h.source === "admin" ? "#ffd600" : "#546e7a", whiteSpace: "nowrap" }}>
+                            {h.source === "admin" ? `✏️ admin${h.adminName ? ` (${h.adminName})` : ""}` : "👤 jogador"}
+                          </span>
+                          {isCurrent && <span style={{ fontSize: 9, fontWeight: 800, color: "#00e676" }}>ATUAL</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {isEditing ? (
+                  <div style={{ borderTop: "1px dashed rgba(255,214,0,0.25)", paddingTop: 8, marginTop: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <input type="number" min={0} max={30} value={editHome} onChange={e => setEditHome(e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                      <span style={{ color: "#546e7a" }}>×</span>
+                      <input type="number" min={0} max={30} value={editAway} onChange={e => setEditAway(e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                      {isKnockoutPhase(m.phase) && editHome !== "" && editAway !== "" && Number(editHome) === Number(editAway) && (
+                        <>
+                          <span style={{ fontSize: 10, color: "#ffd600", marginLeft: 6 }}>🥅 Pên.:</span>
+                          <input type="number" min={0} max={30} value={editPenHome} onChange={e => setEditPenHome(e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                          <span style={{ color: "#546e7a" }}>×</span>
+                          <input type="number" min={0} max={30} value={editPenAway} onChange={e => setEditPenAway(e.target.value)} style={styles.scoreInputSm} placeholder="0" />
+                        </>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      <button onClick={() => confirmEdit(m)} disabled={saving || editHome === "" || editAway === ""} style={{ flex: 1, background: saving ? "#37474f" : "linear-gradient(90deg,#00bcd4,#0097a7)", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, padding: "7px", cursor: "pointer" }}>
+                        {saving ? "Salvando..." : "✅ Confirmar Alteração"}
+                      </button>
+                      <button onClick={cancelEdit} style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#90a4ae", fontSize: 12, padding: "7px 12px", cursor: "pointer" }}>Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => startEdit(m)} style={{ width: "100%", background: "rgba(255,214,0,0.1)", border: "1px solid rgba(255,214,0,0.3)", borderRadius: 8, color: "#ffd600", fontSize: 11, fontWeight: 700, padding: "6px", cursor: "pointer" }}>
+                    ✏️ {current ? "Corrigir palpite deste jogador" : "Lançar palpite para este jogador"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AUDIT PANEL: lista de jogadores no painel Admin, abre a auditoria de cada um ───
+function AuditPanel({ allNonAdminUsers, matches, predictions, auditLog, handleAdminEditPrediction, addToast }) {
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const shown = allNonAdminUsers.filter(u => u.displayName.toLowerCase().includes(search.toLowerCase()));
+
+  // Conta quantas alterações (de qualquer origem) cada jogador tem no total,
+  // só para dar um indicativo rápido de atividade na lista.
+  const countFor = (userId) => {
+    const userLog = auditLog?.[userId] || {};
+    return Object.values(userLog).reduce((sum, arr) => sum + arr.length, 0);
+  };
+
+  return (
+    <div style={styles.infoCard2}>
+      <strong style={{ color: "#e0e0e0", fontSize: 14 }}>🔍 Auditoria de Palpites</strong>
+      <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
+        Veja todo o histórico de palpites de cada jogador (com data/hora de cada alteração) e corrija manualmente caso algum palpite tenha sumido.
+      </p>
+      <input
+        type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔎 Buscar jogador..."
+        style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e0e0e0", fontSize: 13, padding: "8px 10px", marginBottom: 10, boxSizing: "border-box" }}
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+        {shown.map(u => (
+          <button
+            key={u.id}
+            onClick={() => setSelectedPlayer(u)}
+            style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}
+          >
+            <Avatar name={u.displayName} size={28} photoUrl={u.photoUrl} />
+            <span style={{ flex: 1, fontWeight: 600, fontSize: 13, color: "#e0e0e0" }}>{u.displayName}</span>
+            <span style={{ fontSize: 10, color: "#546e7a" }}>{countFor(u.id)} registro(s)</span>
+            <span style={{ color: "#546e7a", fontSize: 14 }}>›</span>
+          </button>
+        ))}
+        {shown.length === 0 && <p style={{ color: "#546e7a", fontSize: 12, textAlign: "center", padding: "10px 0" }}>Nenhum jogador encontrado.</p>}
+      </div>
+
+      {selectedPlayer && (
+        <AuditModal
+          player={selectedPlayer}
+          matches={matches}
+          predictions={predictions}
+          auditLog={auditLog}
+          handleAdminEditPrediction={handleAdminEditPrediction}
+          onClose={() => setSelectedPlayer(null)}
+          addToast={addToast}
+        />
       )}
     </div>
   );
@@ -2534,7 +2833,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ matches, setMatches, predictions, setPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
+function AdminScreen({ matches, setMatches, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
@@ -2611,7 +2910,9 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, awardPi
 
         <OfficialAwardsPanel officialAwards={officialAwards} setOfficialAwards={setOfficialAwards} matches={matches} addToast={addToast} />
 
-        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} awardPicks={awardPicks} officialAwards={officialAwards} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} setAwardPicks={setAwardPicks} setOfficialAwards={setOfficialAwards} addToast={addToast} />
+        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} auditLog={auditLog} setAuditLog={setAuditLog} awardPicks={awardPicks} officialAwards={officialAwards} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} setAwardPicks={setAwardPicks} setOfficialAwards={setOfficialAwards} addToast={addToast} />
+
+        <AuditPanel allNonAdminUsers={allNonAdminUsers} matches={matches} predictions={predictions} auditLog={auditLog} handleAdminEditPrediction={handleAdminEditPrediction} addToast={addToast} />
 
         <AdminUsersPanel allNonAdminUsers={allNonAdminUsers} setUsers={setUsers} addToast={addToast} />
 
