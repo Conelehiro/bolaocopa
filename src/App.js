@@ -76,9 +76,9 @@ const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
 const BACKUP_INDEX_KEY = "bolao:backup:index";
-// Backup automático 4x por dia (a cada 6h: 00h, 06h, 12h, 18h UTC), mantendo
-// só os 10 mais recentes — usado pelo useEffect de backup automático.
-const BACKUP_INTERVAL_MS = 6 * 3600 * 1000;
+// Backup automático 4x por dia (00h, 06h, 12h, 18h UTC), mantendo só os 10 mais
+// recentes. A janela em si é calculada via windowKeyFor() dentro do useEffect
+// (alinhada ao relógio), por isso aqui só fica o limite de retenção.
 const MAX_AUTO_BACKUPS = 10;
 const AWARD_BONUS_POINTS = 150;
 // Pontos extras fixos por cravar o placar dos pênaltis num jogo de mata-mata
