@@ -695,24 +695,82 @@ export default function BolaoApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
-  // ── BACKUP AUTOMÁTICO 4X POR DIA (00h, 06h, 12h, 18h) ──
-  // Sempre que o app está aberto, verifica se já entramos em uma nova "janela"
-  // de 6 horas (00:00-06:00, 06:00-12:00, 12:00-18:00, 18:00-24:00, em UTC) desde
-  // o último backup automático salvo no Supabase. Se sim, salva um novo snapshot
-  // e mantém só os 10 mais recentes — os backups manuais não são afetados.
+  // ── BACKUP AUTOMÁTICO 4X POR DIA (00h, 06h, 12h, 18h UTC) ──
+  // Importante: isso roda no navegador de QUALQUER jogador que esteja com o app
+  // aberto (não existe um servidor central rodando isso). Como vários jogadores
+  // podem estar com o app aberto na mesma janela de 6h, sem cuidado dois ou mais
+  // navegadores tentam criar/atualizar o backup ao mesmo tempo e um sobrescreve
+  // o outro — foi isso que causou backups em horários estranhos (17h, 21h, etc.
+  // em vez de 00h/06h/12h/18h) e entradas desaparecendo do índice.
+  //
+  // Correção: 1) a "janela" agora é alinhada ao relógio UTC (00h/06h/12h/18h)
+  // em vez de "6h desde o último backup"; 2) a CHAVE do snapshot é determinística
+  // (inclui a janela, não o timestamp exato), então mesmo que dois navegadores
+  // tentem ao mesmo tempo, eles escrevem na MESMA chave (não duplicam); 3) a
+  // atualização do índice usa lock otimista: lê o índice, escreve, e RELÊ para
+  // confirmar que ninguém escreveu por cima entre os dois passos — se alguém
+  // escreveu, tenta de novo em vez de simplesmente sobrescrever.
   useEffect(() => {
     if (!storageReady) return;
     let cancelled = false;
-    const run = async () => {
-      try {
+
+    const windowKeyFor = (ts) => {
+      const d = new Date(ts);
+      const windowStartHour = Math.floor(d.getUTCHours() / 6) * 6; // 0, 6, 12 ou 18
+      const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD (em UTC)
+      return `${dateStr}T${String(windowStartHour).padStart(2, "0")}`; // ex: 2026-06-28T12
+    };
+
+    // Atualiza o índice de backups com retry otimista: relê antes de escrever
+    // para não perder concorrentemente entradas gravadas por outro navegador
+    // entre a leitura inicial e agora.
+    const upsertIndexEntry = async (newEntry) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
         const idxRes = await storage.get(BACKUP_INDEX_KEY);
         const index = idxRes ? JSON.parse(idxRes.value) : [];
-        const last = index.filter(b => b.auto)[0];
+        if (index.some(b => b.key === newEntry.key)) return; // outro navegador já registrou esta janela
+        let updatedIndex = [newEntry, ...index].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Mantém só os 10 backups automáticos mais recentes, apagando de fato
+        // os snapshots antigos no Supabase (não só removendo do índice).
+        const autoEntries = updatedIndex.filter(b => b.auto);
+        if (autoEntries.length > MAX_AUTO_BACKUPS) {
+          const toRemove = autoEntries.slice(MAX_AUTO_BACKUPS);
+          const removeKeys = new Set(toRemove.map(b => b.key));
+          await Promise.all(toRemove.map(b => storage.delete(b.key).catch(() => {})));
+          updatedIndex = updatedIndex.filter(b => !removeKeys.has(b.key));
+        }
+
+        await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updatedIndex));
+        // Confirma que a escrita não foi imediatamente sobrescrita por outro
+        // navegador concorrente; se foi, tenta de novo incorporando o que mudou.
+        const verifyRes = await storage.get(BACKUP_INDEX_KEY);
+        const verifyIndex = verifyRes ? JSON.parse(verifyRes.value) : [];
+        if (verifyIndex.some(b => b.key === newEntry.key)) return; // sucesso
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 700)); // pequeno jitter antes de tentar de novo
+      }
+    };
+
+    const run = async () => {
+      try {
         const now = Date.now();
-        // Janela atual de 6h (0, 1, 2 ou 3 desde a meia-noite UTC)
-        const currentWindow = Math.floor(now / BACKUP_INTERVAL_MS);
-        const lastWindow = last ? Math.floor(new Date(last.createdAt).getTime() / BACKUP_INTERVAL_MS) : -1;
-        if (last && currentWindow === lastWindow) return; // já fizemos backup nesta janela de 6h
+        const winKey = windowKeyFor(now);
+        const snapshotKey = `bolao:backup:auto:${winKey}`; // chave determinística por janela
+
+        // Se o snapshot desta janela já existe (criado por este ou outro
+        // navegador), não faz nada além de garantir que está no índice.
+        const existingSnap = await storage.get(snapshotKey);
+        if (existingSnap) {
+          const idxRes = await storage.get(BACKUP_INDEX_KEY);
+          const index = idxRes ? JSON.parse(idxRes.value) : [];
+          if (!index.some(b => b.key === snapshotKey)) {
+            try {
+              const parsed = JSON.parse(existingSnap.value);
+              await upsertIndexEntry({ key: snapshotKey, createdAt: parsed.createdAt, auto: true, users: parsed.users.length, matches: parsed.matches.length });
+            } catch {}
+          }
+          return;
+        }
 
         // Lê o estado mais atual direto do Supabase (não da memória local) para
         // garantir que o backup reflita o que está realmente salvo.
@@ -729,23 +787,10 @@ export default function BolaoApp() {
           matches: m ? JSON.parse(m.value) : [],
           predictions: p ? JSON.parse(p.value) : {},
         };
-        const key = `bolao:backup:${snapshot.createdAt}`;
-        await storage.set(key, JSON.stringify(snapshot));
+        await storage.set(snapshotKey, JSON.stringify(snapshot));
 
-        const newEntry = { key, createdAt: snapshot.createdAt, auto: true, users: snapshot.users.length, matches: snapshot.matches.length };
-        let updatedIndex = [newEntry, ...index];
-
-        // Limpeza real: mantém só os 10 backups automáticos mais recentes,
-        // apagando de fato os snapshots antigos no Supabase (não só do índice).
-        const autoEntries = updatedIndex.filter(b => b.auto);
-        if (autoEntries.length > MAX_AUTO_BACKUPS) {
-          const toRemove = autoEntries.slice(MAX_AUTO_BACKUPS); // os mais antigos, além dos 10 permitidos
-          const removeKeys = new Set(toRemove.map(b => b.key));
-          await Promise.all(toRemove.map(b => storage.delete ? storage.delete(b.key) : Promise.resolve()));
-          updatedIndex = updatedIndex.filter(b => !removeKeys.has(b.key));
-        }
-
-        await storage.set(BACKUP_INDEX_KEY, JSON.stringify(updatedIndex));
+        const newEntry = { key: snapshotKey, createdAt: snapshot.createdAt, auto: true, users: snapshot.users.length, matches: snapshot.matches.length };
+        await upsertIndexEntry(newEntry);
       } catch {}
     };
     run();
