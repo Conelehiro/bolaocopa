@@ -76,11 +76,12 @@ const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
 const BACKUP_INDEX_KEY = "bolao:backup:index";
-// Backup automático 4x por dia (00h, 06h, 12h, 18h UTC), mantendo só os 10 mais
+// Backup automático 4x por dia (00h, 06h, 12h, 18h em horário de Brasília),
+// mantendo só os 10 mais
 // recentes. A janela em si é calculada via windowKeyFor() dentro do useEffect
 // (alinhada ao relógio), por isso aqui só fica o limite de retenção.
 const MAX_AUTO_BACKUPS = 10;
-const AWARD_BONUS_POINTS = 150;
+const AWARD_BONUS_POINTS = 75;
 // Pontos extras fixos por cravar o placar dos pênaltis num jogo de mata-mata
 // que terminou empatado. Não é multiplicado pela fase (vale sempre 50, do
 // mata-mata da Segunda Fase até a Final).
@@ -742,7 +743,7 @@ export default function BolaoApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageReady]);
 
-  // ── BACKUP AUTOMÁTICO 4X POR DIA (00h, 06h, 12h, 18h UTC) ──
+  // ── BACKUP AUTOMÁTICO 4X POR DIA (00h, 06h, 12h, 18h, horário de Brasília) ──
   // Importante: isso roda no navegador de QUALQUER jogador que esteja com o app
   // aberto (não existe um servidor central rodando isso). Como vários jogadores
   // podem estar com o app aberto na mesma janela de 6h, sem cuidado dois ou mais
@@ -761,10 +762,15 @@ export default function BolaoApp() {
     if (!storageReady) return;
     let cancelled = false;
 
+    // Janela calculada em horário de BRASÍLIA (UTC-3), não em UTC — assim
+    // "00h, 06h, 12h, 18h" batem com o relógio que os jogadores realmente veem,
+    // em vez de ficar 3h adiantado/atrasado por estar em UTC sem ninguém notar.
+    // Brasília não observa horário de verão atualmente, então o offset é fixo.
+    const BRASILIA_OFFSET_MS = 3 * 3600 * 1000;
     const windowKeyFor = (ts) => {
-      const d = new Date(ts);
-      const windowStartHour = Math.floor(d.getUTCHours() / 6) * 6; // 0, 6, 12 ou 18
-      const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD (em UTC)
+      const d = new Date(ts - BRASILIA_OFFSET_MS);
+      const windowStartHour = Math.floor(d.getUTCHours() / 6) * 6; // 0, 6, 12 ou 18 (hora de Brasília)
+      const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD (em Brasília)
       return `${dateStr}T${String(windowStartHour).padStart(2, "0")}`; // ex: 2026-06-28T12
     };
 
@@ -2192,6 +2198,11 @@ function GroupsScreen({ matches, setScreen, currentUser }) {
                       )}
                       <span style={{ fontSize: 12, fontWeight: 600, color: "#e0e0e0", flex: 1, textAlign: "right" }}>{m.away}</span>
                     </div>
+                    {isDrawResult(m.homeScore, m.awayScore) && hasPenaltyPred(m) && (
+                      <div style={{ textAlign: "center", marginTop: 4 }}>
+                        <span style={{ fontSize: 10, color: "#ffd600" }}>🥅 Pênaltis: {m.penHome}×{m.penAway}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2517,7 +2528,7 @@ function BackupPanel({ allUsers, matches, predictions, auditLog, setAuditLog, aw
     <div style={styles.infoCard2}>
       <strong style={{ color: "#e0e0e0", fontSize: 14 }}>💾 Backup dos Dados</strong>
       <p style={{ color: "#78909c", fontSize: 11, margin: "6px 0 12px" }}>
-        Um backup automático é salvo na nuvem 4x por dia (00h, 06h, 12h e 18h UTC). Você também pode salvar manualmente ou baixar um arquivo.
+        Um backup automático é salvo na nuvem 4x por dia (00h, 06h, 12h e 18h, horário de Brasília). Você também pode salvar manualmente ou baixar um arquivo.
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -2586,15 +2597,17 @@ function AuditModal({ player, matches, predictions, auditLog, handleAdminEditPre
 
   const myLog = auditLog?.[player.id] || {};
   const myPreds = predictions[player.id] || {};
-  // Ordena os jogos: primeiro os que têm histórico de auditoria (mais recente
-  // alterado primeiro), depois os demais por data.
+  // Ordena pela data/horário do JOGO em si (não pela data da edição):
+  // primeiro os jogos que já ocorreram, do mais recente para o mais antigo;
+  // depois os jogos futuros (que ainda nem rolaram), do mais próximo em diante.
+  const now = Date.now();
   const sorted = [...matches].sort((a, b) => {
-    const aHas = (myLog[a.id] || []).length > 0;
-    const bHas = (myLog[b.id] || []).length > 0;
-    if (aHas !== bHas) return aHas ? -1 : 1;
-    const aLast = aHas ? new Date(myLog[a.id][myLog[a.id].length - 1].savedAt).getTime() : 0;
-    const bLast = bHas ? new Date(myLog[b.id][myLog[b.id].length - 1].savedAt).getTime() : 0;
-    return bLast - aLast;
+    const aTime = matchDateTime(a).getTime();
+    const bTime = matchDateTime(b).getTime();
+    const aPast = aTime <= now;
+    const bPast = bTime <= now;
+    if (aPast !== bPast) return aPast ? -1 : 1; // jogos já ocorridos vêm antes dos futuros
+    return aPast ? bTime - aTime : aTime - bTime; // passados: mais recente primeiro / futuros: mais próximo primeiro
   });
 
   const startEdit = (m) => {
