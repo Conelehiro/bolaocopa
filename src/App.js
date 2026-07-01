@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── SUPABASE STORAGE ADAPTER ──────────────────────────────────────────────────
 // Reads/writes a shared key-value table so ALL participants see the same data
@@ -11,6 +11,13 @@ const SUPABASE_HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
 };
 
+// ATENÇÃO (config. no Supabase): para o upsert atômico abaixo funcionar sem
+// "cair" no fallback antigo, a coluna `key` da tabela `bolao_data` precisa ter
+// uma constraint UNIQUE (ou ser a PRIMARY KEY). Sem isso, o Postgres não tem
+// como saber qual linha é "a mesma chave" durante o ON CONFLICT, e a chamada
+// de upsert retorna erro — nesse caso o código cai automaticamente no método
+// antigo (check-then-write), que é o que causava o bug de palpite duplicado/
+// perdido quando dois jogadores salvavam ao mesmo tempo.
 const storage = {
   async get(key) {
     try {
@@ -24,32 +31,31 @@ const storage = {
       return { key, value: rows[0].value };
     } catch { return null; }
   },
+  // Grava de forma ATÔMICA via upsert do PostgREST (POST + Prefer: resolution=
+  // merge-duplicates + on_conflict=key). Isso elimina a janela de corrida que
+  // existia antes entre "verificar se a chave existe" e "inserir/atualizar":
+  // se dois navegadores chamassem set() ao mesmo tempo para uma chave nova,
+  // os dois podiam achar que ela "não existe" e os dois inserirem, criando
+  // duas linhas com a mesma chave — e o get() seguinte podia devolver
+  // qualquer uma das duas (inclusive a mais antiga), fazendo o palpite
+  // "desaparecer". Com upsert atômico isso não pode mais acontecer.
   async set(key, value) {
     try {
-      // Check if the key already exists
-      const checkRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/bolao_data?key=eq.${encodeURIComponent(key)}&select=key`,
-        { headers: SUPABASE_HEADERS }
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bolao_data?on_conflict=key`,
+        {
+          method: "POST",
+          headers: { ...SUPABASE_HEADERS, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify({ key, value }),
+        }
       );
-      const existing = checkRes.ok ? await checkRes.json() : [];
-
-      if (existing.length > 0) {
-        // UPDATE
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/bolao_data?key=eq.${encodeURIComponent(key)}`,
-          { method: "PATCH", headers: SUPABASE_HEADERS, body: JSON.stringify({ value }) }
-        );
-        if (!res.ok) return null;
-      } else {
-        // INSERT
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/bolao_data`,
-          { method: "POST", headers: SUPABASE_HEADERS, body: JSON.stringify({ key, value }) }
-        );
-        if (!res.ok) return null;
-      }
-      return { key, value };
-    } catch { return null; }
+      if (res.ok) return { key, value };
+      // Fallback (ex.: tabela sem constraint UNIQUE em `key` ainda) — mantém o
+      // comportamento antigo para não quebrar caso o upsert não esteja disponível.
+      return await legacyCheckThenWriteSet(key, value);
+    } catch {
+      try { return await legacyCheckThenWriteSet(key, value); } catch { return null; }
+    }
   },
   async delete(key) {
     try {
@@ -60,7 +66,54 @@ const storage = {
       return res.ok;
     } catch { return false; }
   },
+  // Lista todas as linhas cuja chave começa com `prefix` (usado para guardar
+  // os palpites/histórico de cada jogador em sua PRÓPRIA linha — ver
+  // PRED_KEY_PREFIX / AUDIT_KEY_PREFIX — em vez de um único blob compartilhado
+  // por todos os jogadores, que é o que tornava os palpites vulneráveis a
+  // serem sobrescritos quando duas pessoas salvavam por perto uma da outra).
+  //
+  // IMPORTANTE: em caso de falha de rede/HTTP, devolve `null` — NUNCA `[]`.
+  // Isso é crucial: se devolvêssemos [] tanto para "deu erro" quanto para
+  // "está tudo vazio de verdade", quem chama essa função não teria como saber
+  // a diferença, e um simples engasgo de rede durante a sincronização
+  // periódica (a cada 20s) seria interpretado como "ninguém tem palpite
+  // nenhum", apagando os palpites de todo mundo da tela — mesmo sem duas
+  // pessoas salvando ao mesmo tempo. Esse foi um bug real: os palpites de um
+  // jogador podiam "aparecer e, do nada, sumir" horas depois de salvos, só por
+  // causa de uma falha passageira de rede num ciclo de sincronização.
+  async listByPrefix(prefix) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/bolao_data?key=like.${encodeURIComponent(prefix)}*&select=key,value`,
+        { headers: SUPABASE_HEADERS }
+      );
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  },
 };
+
+async function legacyCheckThenWriteSet(key, value) {
+  const checkRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/bolao_data?key=eq.${encodeURIComponent(key)}&select=key`,
+    { headers: SUPABASE_HEADERS }
+  );
+  const existing = checkRes.ok ? await checkRes.json() : [];
+  if (existing.length > 0) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bolao_data?key=eq.${encodeURIComponent(key)}`,
+      { method: "PATCH", headers: SUPABASE_HEADERS, body: JSON.stringify({ value }) }
+    );
+    if (!res.ok) return null;
+  } else {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/bolao_data`,
+      { method: "POST", headers: SUPABASE_HEADERS, body: JSON.stringify({ key, value }) }
+    );
+    if (!res.ok) return null;
+  }
+  return { key, value };
+}
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PHASE_MULTIPLIERS = {
@@ -76,6 +129,102 @@ const BASE_POINTS = { exact: 10, winner: 5 };
 const LOCK_MINUTES_BEFORE = 10;
 const NOTIFY_MINUTES_BEFORE = 30;
 const BACKUP_INDEX_KEY = "bolao:backup:index";
+// ── PALPITES E AUDITORIA: uma LINHA POR JOGADOR no Supabase ──────────────────
+// Antes, TODOS os palpites de TODOS os jogadores ficavam num único blob JSON
+// guardado numa chave só ("bolao:predictions"). Isso significa que, se dois
+// jogadores salvassem palpites quase ao mesmo tempo, o segundo a escrever
+// sobrescrevia o blob inteiro, podendo apagar o palpite que o primeiro
+// tinha acabado de salvar (e o mesmo valia para o histórico de auditoria).
+// Agora cada jogador grava SÓ a própria linha (chave "bolao:predictions:<id>"),
+// então o palpite de um jogador nunca compete com a escrita de outro.
+const PRED_KEY_PREFIX = "bolao:predictions:";
+const AUDIT_KEY_PREFIX = "bolao:auditLog:";
+// Chaves antigas (formato de blob único) — mantidas só para migrar dados que
+// já existiam antes dessa mudança, na primeira carga após a atualização.
+const OLD_PREDICTIONS_KEY = "bolao:predictions";
+const OLD_AUDIT_LOG_KEY = "bolao:auditLog";
+// Janela de "graça" depois que ESTE navegador grava algo: durante esse tempo,
+// a sincronização periódica (a cada 20s) não sobrescreve o dado local com o
+// que vier do servidor. Isso evita que uma leitura de sync "em voo" (iniciada
+// um instante antes do salvamento) chegue depois e substitua o palpite recém
+// salvo por uma versão antiga — fazendo ele "sumir" da tela e, pior, ser
+// regravado por cima no servidor pelo efeito de auto-salvamento. Tem que ser
+// maior que o intervalo do poll (20s) para garantir pular pelo menos um ciclo.
+const SYNC_GRACE_MS = 25000;
+
+// Junta todas as linhas "bolao:predictions:<id>" numa única estrutura
+// { [userId]: { [matchId]: pred } }, igual ao formato que o app já usa em
+// memória — só muda como isso é guardado no Supabase, não como é usado na tela.
+// Devolve `null` (e não `{}`) se a busca falhou de verdade (ver listByPrefix),
+// para quem chamar saber que deve MANTER o estado atual em vez de aplicar
+// um "vazio" que pode não ser real.
+async function loadAllPredictions() {
+  const rows = await storage.listByPrefix(PRED_KEY_PREFIX);
+  if (rows === null) return null;
+  const combined = {};
+  rows.forEach(r => {
+    const userId = r.key.slice(PRED_KEY_PREFIX.length);
+    try { combined[userId] = JSON.parse(r.value); } catch {}
+  });
+  return combined;
+}
+async function loadAllAuditLogs() {
+  const rows = await storage.listByPrefix(AUDIT_KEY_PREFIX);
+  if (rows === null) return null;
+  const combined = {};
+  rows.forEach(r => {
+    const userId = r.key.slice(AUDIT_KEY_PREFIX.length);
+    try { combined[userId] = JSON.parse(r.value); } catch {}
+  });
+  return combined;
+}
+// Grava os palpites de UM jogador só (não toca na linha de mais ninguém).
+async function saveUserPredictions(userId, preds) {
+  return storage.set(`${PRED_KEY_PREFIX}${userId}`, JSON.stringify(preds || {}));
+}
+async function saveUserAuditLog(userId, log) {
+  return storage.set(`${AUDIT_KEY_PREFIX}${userId}`, JSON.stringify(log || {}));
+}
+// Migração única: se ainda não existe NENHUMA linha no formato novo mas existe
+// o blob antigo, divide o blob antigo em uma linha por jogador. Roda só uma
+// vez por jogador na prática (depois disso sempre vai haver linhas novas).
+async function migrateLegacyBlobToPerUser(oldKey, prefix) {
+  try {
+    const old = await storage.get(oldKey);
+    if (!old) return {};
+    const parsed = JSON.parse(old.value);
+    const userIds = Object.keys(parsed || {});
+    await Promise.all(userIds.map(uid => storage.set(`${prefix}${uid}`, JSON.stringify(parsed[uid]))));
+    return parsed || {};
+  } catch { return {}; }
+}
+// Carrega o estado combinado mais atual de palpites/auditoria, migrando do
+// formato antigo (blob único) automaticamente se for a primeira vez.
+// Se a busca falhar (null), NÃO tenta migrar (evitaria recriar dados vazios
+// por engano) — devolve null para o chamador decidir o que fazer.
+async function loadPredictionsWithMigration() {
+  const combined = await loadAllPredictions();
+  if (combined === null) return null;
+  if (Object.keys(combined).length > 0) return combined;
+  return migrateLegacyBlobToPerUser(OLD_PREDICTIONS_KEY, PRED_KEY_PREFIX);
+}
+async function loadAuditLogsWithMigration() {
+  const combined = await loadAllAuditLogs();
+  if (combined === null) return null;
+  if (Object.keys(combined).length > 0) return combined;
+  return migrateLegacyBlobToPerUser(OLD_AUDIT_LOG_KEY, AUDIT_KEY_PREFIX);
+}
+// Reescreve TODAS as linhas por jogador a partir de um blob combinado — usado
+// só ao restaurar um backup completo (arquivo .json ou snapshot da nuvem),
+// onde de fato queremos substituir tudo de uma vez.
+async function writeAllPredictions(combined) {
+  const ids = Object.keys(combined || {});
+  await Promise.all(ids.map(uid => saveUserPredictions(uid, combined[uid])));
+}
+async function writeAllAuditLogs(combined) {
+  const ids = Object.keys(combined || {});
+  await Promise.all(ids.map(uid => saveUserAuditLog(uid, combined[uid])));
+}
 // Backup automático 4x por dia (00h, 06h, 12h, 18h em horário de Brasília),
 // mantendo só os 10 mais
 // recentes. A janela em si é calculada via windowKeyFor() dentro do useEffect
@@ -550,6 +699,8 @@ export default function BolaoApp() {
   // Auth state
   const [users, setUsers] = useState(DEFAULT_USERS);
   const [currentUser, setCurrentUserRaw] = useState(null);
+  const currentUserRef = useRef(null);
+  currentUserRef.current = currentUser;
   const setCurrentUser = (user) => {
     setCurrentUserRaw(user);
     try {
@@ -586,18 +737,29 @@ export default function BolaoApp() {
   const notifiedRef = useRef(new Set());
   const isDesktop = useIsDesktop();
 
+  // Guarda o horário (Date.now()) da última vez que ESTE navegador gravou,
+  // localmente, cada tipo de dado. Usado pelo poll de sincronização (mais
+  // abaixo) para não sobrescrever, por engano, uma mudança que acabamos de
+  // salvar com uma versão antiga ainda "em voo" vinda do servidor — essa era
+  // uma das causas dos palpites "desaparecendo" sem motivo aparente.
+  const savedAtRef = useRef({ users: 0, matches: 0, awardPicks: 0, officialAwards: 0, predictionsSelf: 0 });
+  const setUsersTracked = useCallback((v) => { savedAtRef.current.users = Date.now(); setUsers(v); }, []);
+  const setMatchesTracked = useCallback((v) => { savedAtRef.current.matches = Date.now(); setMatches(v); }, []);
+  const setAwardPicksTracked = useCallback((v) => { savedAtRef.current.awardPicks = Date.now(); setAwardPicks(v); }, []);
+  const setOfficialAwardsTracked = useCallback((v) => { savedAtRef.current.officialAwards = Date.now(); setOfficialAwards(v); }, []);
+
   // ── LOAD FROM STORAGE ──
   useEffect(() => {
     async function load() {
       let loadedUsers = null;
       try {
-        const [u, m, p, ap, oa, al] = await Promise.all([
+        const [u, m, ap, oa, predCombined, auditCombined] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
-          storage.get("bolao:predictions"),
           storage.get("bolao:awardPicks"),
           storage.get("bolao:officialAwards"),
-          storage.get("bolao:auditLog"),
+          loadPredictionsWithMigration(),
+          loadAuditLogsWithMigration(),
         ]);
         if (u) {
           const loaded = JSON.parse(u.value);
@@ -607,10 +769,10 @@ export default function BolaoApp() {
           setUsers(withAdmin);
         }
         if (m) setMatches(JSON.parse(m.value));
-        if (p) setPredictions(JSON.parse(p.value));
+        if (predCombined !== null) setPredictions(predCombined);
         if (ap) setAwardPicks(JSON.parse(ap.value));
         if (oa) setOfficialAwards(JSON.parse(oa.value));
-        if (al) setAuditLog(JSON.parse(al.value));
+        if (auditCombined !== null) setAuditLog(auditCombined);
       } catch {
         // First run or storage empty — use defaults
       }
@@ -648,17 +810,13 @@ export default function BolaoApp() {
     storage.set("bolao:matches", JSON.stringify(matches)).catch(() => {});
   }, [matches, storageReady]);
 
-  // ── SAVE PREDICTIONS TO STORAGE ──
-  useEffect(() => {
-    if (!storageReady) return;
-    storage.set("bolao:predictions", JSON.stringify(predictions)).catch(() => {});
-  }, [predictions, storageReady]);
-
-  // ── SAVE AUDIT LOG (histórico de todos os palpites já salvos) TO STORAGE ──
-  useEffect(() => {
-    if (!storageReady) return;
-    storage.set("bolao:auditLog", JSON.stringify(auditLog)).catch(() => {});
-  }, [auditLog, storageReady]);
+  // Palpites (predictions) e o histórico de auditoria (auditLog) NÃO têm mais
+  // um useEffect genérico de "salvar sempre que mudar" — cada um agora é
+  // gravado explicitamente (uma linha por jogador) no exato momento em que é
+  // alterado: handleSavePredictions / handleAdminEditPrediction / appendAuditEntries
+  // / restauração de backup, mais abaixo. Isso evita que uma sincronização
+  // periódica (que só deveria ATUALIZAR A TELA) acabe regravando no servidor
+  // um valor antigo por cima de um palpite que outra aba/jogador salvou.
 
   // ── SAVE AWARD PICKS (Artilheiro/Garçom) TO STORAGE ──
   useEffect(() => {
@@ -679,27 +837,58 @@ export default function BolaoApp() {
   }, []);
 
   // ── SYNC: poll Supabase every 20s so all participants see fresh data ──
+  // Importante: isso só ATUALIZA A TELA com o que está no servidor. Nunca
+  // grava nada de volta diretamente — quem grava são as ações explícitas
+  // (salvar palpite, admin editar placar, etc). Para users/matches/awardPicks/
+  // officialAwards, que ainda usam os efeitos de "auto-save" acima, aplicamos
+  // uma janela de graça: se ESTE navegador gravou aquele dado há pouco tempo
+  // (SYNC_GRACE_MS), pulamos a atualização deste campo neste ciclo, para não
+  // teimar e sobrescrever a própria mudança recente com uma leitura antiga
+  // que começou antes da gravação terminar.
   useEffect(() => {
     if (!storageReady) return;
     const sync = async () => {
       try {
-        const [u, m, p, ap, oa, al] = await Promise.all([
+        const now = Date.now();
+        const fresh = (key) => (now - savedAtRef.current[key]) > SYNC_GRACE_MS;
+        const [u, m, ap, oa, predCombined, auditCombined] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
-          storage.get("bolao:predictions"),
           storage.get("bolao:awardPicks"),
           storage.get("bolao:officialAwards"),
-          storage.get("bolao:auditLog"),
+          loadAllPredictions(),
+          loadAllAuditLogs(),
         ]);
-        if (u) {
+        if (u && fresh("users")) {
           const loaded = JSON.parse(u.value);
           setUsers([ADMIN_USER, ...loaded.filter(x => !x.isAdmin)]);
         }
-        if (m) setMatches(JSON.parse(m.value));
-        if (p) setPredictions(JSON.parse(p.value));
-        if (ap) setAwardPicks(JSON.parse(ap.value));
-        if (oa) setOfficialAwards(JSON.parse(oa.value));
-        if (al) setAuditLog(JSON.parse(al.value));
+        if (m && fresh("matches")) setMatches(JSON.parse(m.value));
+        if (ap && fresh("awardPicks")) setAwardPicks(JSON.parse(ap.value));
+        if (oa && fresh("officialAwards")) setOfficialAwards(JSON.parse(oa.value));
+        // Palpites: aplica os de todos os jogadores normalmente, mas preserva
+        // a linha do PRÓPRIO usuário logado se ele salvou há pouco tempo (pode
+        // ser que esta leitura tenha começado antes daquele salvamento
+        // terminar de gravar no servidor — não queremos que ela "vença" e
+        // apague visualmente o palpite que ele mesmo acabou de salvar).
+        //
+        // Se predCombined vier `null`, foi uma FALHA de rede/HTTP nesta busca
+        // (ver listByPrefix) — não uma confirmação de que não há palpites.
+        // Nesse caso pulamos a atualização deste ciclo por completo, e
+        // tentamos de novo no próximo (20s depois). Aplicar `null` como se
+        // fosse "vazio de verdade" era exatamente o que fazia os palpites
+        // de todo mundo desaparecerem da tela por causa de um simples
+        // engasgo de rede, sem nenhum jogador ter salvo por cima.
+        if (predCombined !== null) {
+          setPredictions(prev => {
+            const merged = { ...predCombined };
+            if (currentUserRef.current && !fresh("predictionsSelf")) {
+              merged[currentUserRef.current.id] = prev[currentUserRef.current.id];
+            }
+            return merged;
+          });
+        }
+        if (auditCombined !== null) setAuditLog(auditCombined);
       } catch {}
     };
     const t = setInterval(sync, 20000);
@@ -732,6 +921,7 @@ export default function BolaoApp() {
         const merged = mergeOfficial(base, official);
         const mergedStr = JSON.stringify(merged);
         if (mergedStr !== (baseStr ?? JSON.stringify(base))) {
+          savedAtRef.current.matches = Date.now();
           setMatches(merged);
           storage.set("bolao:matches", mergedStr).catch(() => {});
         }
@@ -826,21 +1016,30 @@ export default function BolaoApp() {
         }
 
         // Lê o estado mais atual direto do Supabase (não da memória local) para
-        // garantir que o backup reflita o que está realmente salvo.
-        const [u, m, p, al] = await Promise.all([
+        // garantir que o backup reflita o que está realmente salvo. Palpites e
+        // auditoria agora vivem em uma linha por jogador, então são lidos via
+        // loadAllPredictions()/loadAllAuditLogs() em vez de uma chave única.
+        const [u, m, predCombined, auditCombined] = await Promise.all([
           storage.get("bolao:users"),
           storage.get("bolao:matches"),
-          storage.get("bolao:predictions"),
-          storage.get("bolao:auditLog"),
+          loadAllPredictions(),
+          loadAllAuditLogs(),
         ]);
         if (cancelled) return;
+        // Se a busca de palpites/auditoria falhou (null = erro de rede, não
+        // "vazio de verdade" — ver listByPrefix), NÃO cria o snapshot agora.
+        // Um backup automático com palpites vazios por causa de um engasgo de
+        // rede seria pior que não ter backup: alguém poderia restaurá-lo mais
+        // tarde pensando ser válido e apagar os palpites reais. Tenta de novo
+        // no próximo ciclo (10 min depois).
+        if (predCombined === null || auditCombined === null) return;
         const snapshot = {
           createdAt: new Date(now).toISOString(),
           auto: true,
           users: u ? JSON.parse(u.value).filter(x => !x.isAdmin) : [],
           matches: m ? JSON.parse(m.value) : [],
-          predictions: p ? JSON.parse(p.value) : {},
-          auditLog: al ? JSON.parse(al.value) : {},
+          predictions: predCombined,
+          auditLog: auditCombined,
         };
         await storage.set(snapshotKey, JSON.stringify(snapshot));
 
@@ -910,32 +1109,31 @@ export default function BolaoApp() {
   // Acrescenta novas entradas ao histórico de auditoria de um usuário, SEM
   // apagar as anteriores, mesclando primeiro com a versão mais recente do
   // Supabase (para não perder entradas gravadas por outro navegador/jogador
-  // entre a leitura e a escrita).
+  // entre a leitura e a escrita). Agora isso lê/grava só a LINHA desse
+  // usuário ("bolao:auditLog:<userId>"), então editar o histórico de um
+  // jogador nunca compete com a gravação do histórico de outro.
   const appendAuditEntries = async (userId, entriesByMatchId) => {
-    let latestLog = auditLog;
+    let userLog = { ...(auditLog[userId] || {}) };
     try {
-      const remote = await storage.get("bolao:auditLog");
-      if (remote) latestLog = JSON.parse(remote.value);
+      const remote = await storage.get(`${AUDIT_KEY_PREFIX}${userId}`);
+      if (remote) userLog = { ...JSON.parse(remote.value) };
     } catch {}
-    const userLog = { ...(latestLog[userId] || {}) };
     Object.entries(entriesByMatchId).forEach(([matchId, entry]) => {
       const prevEntries = userLog[matchId] || [];
       userLog[matchId] = [...prevEntries, entry];
     });
-    const merged = { ...latestLog, [userId]: userLog };
-    setAuditLog(merged);
+    setAuditLog(prev => ({ ...prev, [userId]: userLog }));
+    await saveUserAuditLog(userId, userLog);
   };
 
   const handleSavePredictions = async () => {
-    // Fetch the freshest predictions from Supabase first, so we don't
-    // overwrite other participants' saves that happened concurrently.
-    let latest = predictions;
-    try {
-      const remote = await storage.get("bolao:predictions");
-      if (remote) latest = JSON.parse(remote.value);
-    } catch {}
-    const merged = { ...latest, [currentUser.id]: { ...tempPredictions } };
-    setPredictions(merged);
+    // Cada jogador agora grava só a PRÓPRIA linha ("bolao:predictions:<id>"),
+    // então não existe mais risco de o palpite de um jogador sobrescrever o
+    // de outro — cada um escreve numa "gaveta" separada no banco.
+    const myPreds = { ...tempPredictions };
+    setPredictions(prev => ({ ...prev, [currentUser.id]: myPreds }));
+    savedAtRef.current.predictionsSelf = Date.now();
+    await saveUserPredictions(currentUser.id, myPreds);
 
     // Auditoria: registra uma nova entrada para CADA jogo com palpite
     // preenchido neste save — mesmo que o valor seja igual ao salvo antes,
@@ -957,14 +1155,17 @@ export default function BolaoApp() {
   // um palpite "sumiu" e o admin confirma na auditoria que ele realmente
   // apostou). Substitui o palpite atual normalmente, e fica registrado no
   // histórico de auditoria como alterado pelo admin, com o nome de quem fez.
+  // Lê/grava só a linha do jogador afetado (igual ao salvamento normal).
   const handleAdminEditPrediction = async (userId, matchId, pred) => {
-    let latestPreds = predictions;
+    let userPreds = { ...(predictions[userId] || {}) };
     try {
-      const remote = await storage.get("bolao:predictions");
-      if (remote) latestPreds = JSON.parse(remote.value);
+      const remote = await storage.get(`${PRED_KEY_PREFIX}${userId}`);
+      if (remote) userPreds = { ...JSON.parse(remote.value) };
     } catch {}
-    const mergedPreds = { ...latestPreds, [userId]: { ...(latestPreds[userId] || {}), [matchId]: pred } };
-    setPredictions(mergedPreds);
+    userPreds[matchId] = pred;
+    setPredictions(prev => ({ ...prev, [userId]: userPreds }));
+    if (currentUser?.id === userId) savedAtRef.current.predictionsSelf = Date.now();
+    await saveUserPredictions(userId, userPreds);
 
     const savedAt = new Date().toISOString();
     await appendAuditEntries(userId, {
@@ -981,8 +1182,9 @@ export default function BolaoApp() {
       if (remote) latest = JSON.parse(remote.value);
     } catch {}
     const merged = { ...latest, [userId]: { ...latest[userId], ...picks } };
-    setAwardPicks(merged);
+    setAwardPicksTracked(merged);
   };
+
 
   const [aiMatches, setAiMatches] = useState(null);
   const handleFetchAI = async () => {
@@ -1009,7 +1211,7 @@ export default function BolaoApp() {
   };
   const applyScoreUpdates = () => {
     if (!scoreUpdates || scoreUpdates.length === 0) return;
-    setMatches(prev => prev.map(m => {
+    setMatchesTracked(prev => prev.map(m => {
       const upd = scoreUpdates.find(u => u.match.id === m.id);
       if (!upd) return m;
       const stillDraw = Number(upd.newHomeScore) === Number(upd.newAwayScore);
@@ -1039,7 +1241,28 @@ export default function BolaoApp() {
   // ── ROUTER ──
   const regularUsers = users.filter(u => !u.isAdmin && !u.inactive);
   const allNonAdminUsers = users.filter(u => !u.isAdmin);
-  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers, currentUser, setCurrentUser, matches, setMatches, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, tempPredictions, setTempPredictions, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, handleSaveAwardPick, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
+  // Restaura um backup completo (arquivo .json ou snapshot da nuvem) de forma
+  // consistente com o novo formato "uma linha por jogador": além de atualizar
+  // a tela, regrava EXPLICITAMENTE cada linha de palpites/auditoria no
+  // Supabase (já que elas não são mais persistidas pelo efeito automático
+  // genérico), e marca os timestamps de "salvei agora" para todos os tipos de
+  // dado, evitando que a sincronização periódica sobrescreva o backup
+  // recém-restaurado com a versão antiga que havia antes dele.
+  const restoreFullBackup = async (data) => {
+    const mergedUsers = [ADMIN_USER, ...(data.users || []).filter(u => !u.isAdmin)];
+    const preds = data.predictions || {};
+    const audit = data.auditLog || {};
+    setUsersTracked(mergedUsers);
+    setMatchesTracked(data.matches || []);
+    setAwardPicksTracked(data.awardPicks || {});
+    setOfficialAwardsTracked(data.officialAwards || { topScorer: "", topAssist: "" });
+    setPredictions(preds);
+    setAuditLog(audit);
+    savedAtRef.current.predictionsSelf = Date.now();
+    await Promise.all([writeAllPredictions(preds), writeAllAuditLogs(audit)]);
+  };
+
+  const props = { users: regularUsers, allUsers: users, allNonAdminUsers, setUsers: setUsersTracked, currentUser, setCurrentUser, matches, setMatches: setMatchesTracked, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, tempPredictions, setTempPredictions, awardPicks, setAwardPicks: setAwardPicksTracked, officialAwards, setOfficialAwards: setOfficialAwardsTracked, handleSaveAwardPick, restoreFullBackup, activePhase, setActivePhase, phases, adminUnlocked, setAdminUnlocked, adminScores, setAdminScores, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, savedAlert, handleSavePredictions, handleFetchAI, ranking, setScreen, logout, now, addToast };
 
   // Trava de segurança: se a senha ainda precisa ser trocada, nenhuma outra tela
   // logada pode ser exibida — força sempre a tela de redefinição.
@@ -2412,7 +2635,7 @@ function ScoreUpdatesPanel({ checkingUpdates, checkError, scoreUpdates, handleCh
 }
 
 // ─── BACKUP PANEL ─────────────────────────────────────────────────────────────
-function BackupPanel({ allUsers, matches, predictions, auditLog, setAuditLog, awardPicks, officialAwards, setUsers, setMatches, setPredictions, setAwardPicks, setOfficialAwards, addToast }) {
+function BackupPanel({ allUsers, matches, predictions, auditLog, awardPicks, officialAwards, restoreFullBackup, addToast }) {
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [backupList, setBackupList] = useState(null);
@@ -2465,13 +2688,10 @@ function BackupPanel({ allUsers, matches, predictions, auditLog, setAuditLog, aw
       try {
         const data = JSON.parse(ev.target.result);
         if (!data.users || !data.matches || !data.predictions) throw new Error("Formato inválido");
-        const merged = [ADMIN_USER, ...data.users.filter(u => !u.isAdmin)];
-        setUsers(merged);
-        setMatches(data.matches);
-        setPredictions(data.predictions);
-        setAuditLog(data.auditLog || {});
-        setAwardPicks(data.awardPicks || {});
-        setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
+        // restoreFullBackup já regrava cada linha de palpites/auditoria no
+        // Supabase (não basta só atualizar a tela) e protege contra a
+        // sincronização periódica sobrescrever o restore com dados antigos.
+        await restoreFullBackup(data);
         addToast(`✅ Backup restaurado! (${data.users.length} jogadores, ${data.matches.length} jogos)`, "success");
       } catch {
         addToast("❌ Arquivo de backup inválido.", "warning");
@@ -2510,13 +2730,7 @@ function BackupPanel({ allUsers, matches, predictions, auditLog, setAuditLog, aw
       const res = await storage.get(entry.key);
       if (!res) throw new Error("not found");
       const data = JSON.parse(res.value);
-      const merged = [ADMIN_USER, ...data.users.filter(u => !u.isAdmin)];
-      setUsers(merged);
-      setMatches(data.matches);
-      setAwardPicks(data.awardPicks || {});
-      setOfficialAwards(data.officialAwards || { topScorer: "", topAssist: "" });
-      setPredictions(data.predictions);
-      setAuditLog(data.auditLog || {});
+      await restoreFullBackup(data);
       addToast(`✅ Backup de ${formatBackupDate(entry.createdAt)} restaurado!`, "success");
     } catch {
       addToast("❌ Não foi possível restaurar esse backup.", "warning");
@@ -2846,7 +3060,7 @@ function AdminUsersPanel({ allNonAdminUsers, setUsers, addToast }) {
 }
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
-function AdminScreen({ matches, setMatches, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, addToast }) {
+function AdminScreen({ matches, setMatches, predictions, setPredictions, auditLog, setAuditLog, handleAdminEditPrediction, awardPicks, setAwardPicks, officialAwards, setOfficialAwards, adminScores, setAdminScores, setScreen, handleFetchAI, loadingAI, aiError, aiMatches, setAiMatches, scoreUpdates, checkingUpdates, checkError, handleCheckUpdates, applyScoreUpdates, phases, activePhase, setActivePhase, currentUser, allUsers, allNonAdminUsers, setUsers, restoreFullBackup, addToast }) {
   const filtered = matches.filter(m => m.phase === activePhase);
 
   if (!currentUser?.isAdmin) return (
@@ -2923,7 +3137,7 @@ function AdminScreen({ matches, setMatches, predictions, setPredictions, auditLo
 
         <OfficialAwardsPanel officialAwards={officialAwards} setOfficialAwards={setOfficialAwards} matches={matches} addToast={addToast} />
 
-        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} auditLog={auditLog} setAuditLog={setAuditLog} awardPicks={awardPicks} officialAwards={officialAwards} setUsers={setUsers} setMatches={setMatches} setPredictions={setPredictions} setAwardPicks={setAwardPicks} setOfficialAwards={setOfficialAwards} addToast={addToast} />
+        <BackupPanel allUsers={allUsers} matches={matches} predictions={predictions} auditLog={auditLog} awardPicks={awardPicks} officialAwards={officialAwards} restoreFullBackup={restoreFullBackup} addToast={addToast} />
 
         <AuditPanel allNonAdminUsers={allNonAdminUsers} matches={matches} predictions={predictions} auditLog={auditLog} handleAdminEditPrediction={handleAdminEditPrediction} addToast={addToast} />
 
